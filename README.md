@@ -1,20 +1,40 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# Chatly — Connect. Chat. Share.
 
-# Run and deploy your AI Studio app
+A WhatsApp-style real-time messaging web app built with React 19, TypeScript, Vite and Firebase.
 
-This contains everything you need to run your app locally.
+## Features
 
-View your app in AI Studio: https://ai.studio/apps/4ecc03ab-aea4-4c13-b251-755ae912abd0
+- Direct chats and groups with real-time messages, replies, reactions, edits and deletion
+- Read receipts, typing indicators, presence, pin / mute / archive / block
+- Image, video, document and recorded voice-note sharing
+- 24-hour status updates with viewer tracking and replies
+- Broadcast channels with followers and posts
+- Voice and video calls over WebRTC
+- Light / dark themes with WhatsApp wallpapers
 
-## Run Locally
+## Live
 
-**Prerequisites:**  Node.js
+https://chatly-rho-seven.vercel.app
 
+## Run locally
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+```bash
+bun install
+bun run dev
+```
+
+The app opens on http://localhost:3000.
+
+## Build
+
+```bash
+bun run build
+```
+
+## Firebase setup
+
+The client configuration lives in `firebase-applet-config.json`. In the Firebase Console:
+
+1. Enable **Email/Password** (and optionally **Google**) under Authentication → Sign-in method.
+2. Add your deployment domain under Authentication → Settings → Authorized domains.
+3. Deploy `firestore.rules` and enable Storage for media uploads.
