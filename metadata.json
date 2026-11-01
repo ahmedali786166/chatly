@@ -1,0 +1,9 @@
+{
+  "name": "Chatly",
+  "description": "Connect. Chat. Share. Premium real-time messaging platform with instant chats, groups, channels, media sharing, and WebRTC calls.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

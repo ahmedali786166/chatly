@@ -1,0 +1,549 @@
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  arrayRemove,
+  arrayUnion,
+  collection,
+  doc,
+  onSnapshot,
+  orderBy,
+  query,
+  updateDoc,
+  where,
+} from 'firebase/firestore';
+import { db, handleFirestoreError, OperationType } from '../firebase/config';
+import { useAuth } from '../context/AuthContext';
+import { useNotification } from '../context/NotificationContext';
+import { sounds } from '../services/sound';
+import { Conversation } from '../types';
+import {
+  Archive,
+  BellOff,
+  CheckCheck,
+  MessageCircle,
+  MoreVertical,
+  Plus,
+  Search,
+  Settings,
+  Users,
+  Radio,
+  CircleDashed,
+  Pin,
+  ArchiveRestore,
+  Check,
+} from 'lucide-react';
+
+interface LeftSidebarProps {
+  activeConversationId: string | null;
+  onSelectConversation: (id: string) => void;
+  onOpenNewChat: () => void;
+  onOpenNewGroup: () => void;
+  onOpenStatus: () => void;
+  onOpenChannels: () => void;
+  onOpenSettings: () => void;
+}
+
+type FilterTab = 'all' | 'unread' | 'groups' | 'archived';
+
+export function LeftSidebar({
+  activeConversationId,
+  onSelectConversation,
+  onOpenNewChat,
+  onOpenNewGroup,
+  onOpenStatus,
+  onOpenChannels,
+  onOpenSettings,
+}: LeftSidebarProps) {
+  const { user, profile } = useAuth();
+  const { addToast, sendPushNotification } = useNotification();
+
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [filterTab, setFilterTab] = useState<FilterTab>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [showHeaderMenu, setShowHeaderMenu] = useState(false);
+
+  const seenTimestamps = useRef<Record<string, string>>({});
+  const initialized = useRef(false);
+  const activeIdRef = useRef(activeConversationId);
+  activeIdRef.current = activeConversationId;
+
+  // Real-time conversations (sorted client-side to avoid composite indexes)
+  useEffect(() => {
+    if (!user) return;
+
+    const q = query(
+      collection(db, 'conversations'),
+      where('participantIds', 'array-contains', user.uid)
+    );
+
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const list: Conversation[] = [];
+        snapshot.forEach((d) => list.push({ id: d.id, ...d.data() } as Conversation));
+
+        list.sort(
+          (a, b) =>
+            new Date(b.updatedAt || b.createdAt).getTime() -
+            new Date(a.updatedAt || a.createdAt).getTime()
+        );
+
+        const isFirst = !initialized.current;
+        let notified = false;
+
+        list.forEach((conv) => {
+          const ts = conv.lastMessage?.timestamp;
+          if (!ts) return;
+          const previous = seenTimestamps.current[conv.id];
+
+          if (
+            !isFirst &&
+            previous &&
+            new Date(ts).getTime() > new Date(previous).getTime() &&
+            conv.lastMessage?.senderId !== user.uid &&
+            conv.id !== activeIdRef.current &&
+            !conv.mutedBy?.includes(user.uid)
+          ) {
+            const otherId = conv.participantIds.find((id) => id !== user.uid) || '';
+            const title =
+              conv.type === 'group'
+                ? conv.groupInfo?.name || 'Group'
+                : conv.participantDetails?.[otherId]?.displayName || 'New message';
+            const body = conv.lastMessage?.text || 'New message';
+            const avatar =
+              conv.type === 'group'
+                ? conv.groupInfo?.photoURL
+                : conv.participantDetails?.[otherId]?.photoURL;
+
+            addToast({
+              title,
+              message: body,
+              avatar,
+              onClick: () => onSelectConversation(conv.id),
+            });
+            if (profile?.notificationsEnabled !== false) {
+              sendPushNotification(title, body, avatar);
+            }
+            if (!notified) {
+              sounds.playReceived();
+              notified = true;
+            }
+          }
+
+          seenTimestamps.current[conv.id] = ts;
+        });
+
+        initialized.current = true;
+        setConversations(list);
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'conversations');
+      }
+    );
+
+    return () => unsubscribe();
+  }, [user, profile?.notificationsEnabled]);
+
+  useEffect(() => {
+    if (!showHeaderMenu && !menuFor) return;
+    const close = () => {
+      setShowHeaderMenu(false);
+      setMenuFor(null);
+    };
+    window.addEventListener('click', close);
+    return () => window.removeEventListener('click', close);
+  }, [showHeaderMenu, menuFor]);
+
+  const filteredConversations = useMemo(() => {
+    // Pinned chats stay on top, then latest activity
+    return conversations
+      .filter((c) => {
+      const isArchived = c.archivedBy?.includes(user?.uid || '');
+      if (filterTab === 'archived' && !isArchived) return false;
+      if (filterTab !== 'archived' && isArchived) return false;
+      if (filterTab === 'groups' && c.type !== 'group') return false;
+
+      const unread = c.unreadCounts?.[user?.uid || ''] || 0;
+      if (filterTab === 'unread' && unread === 0) return false;
+
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim();
+        if (c.type === 'group') {
+          return (
+            (c.groupInfo?.name || '').toLowerCase().includes(q) ||
+            (c.lastMessage?.text || '').toLowerCase().includes(q)
+          );
+        }
+        const otherId = c.participantIds.find((id) => id !== user?.uid);
+        const other = otherId ? c.participantDetails?.[otherId] : null;
+        return (
+          (other?.displayName || '').toLowerCase().includes(q) ||
+          (other?.email || '').toLowerCase().includes(q) ||
+          (c.lastMessage?.text || '').toLowerCase().includes(q)
+        );
+      }
+
+      return true;
+      })
+      .sort((a, b) => {
+        const aPinned = a.pinnedBy?.includes(user?.uid || '') ? 1 : 0;
+        const bPinned = b.pinnedBy?.includes(user?.uid || '') ? 1 : 0;
+        if (aPinned !== bPinned) return bPinned - aPinned;
+        return (
+          new Date(b.updatedAt || b.createdAt).getTime() -
+          new Date(a.updatedAt || a.createdAt).getTime()
+        );
+      });
+  }, [conversations, filterTab, searchQuery, user?.uid]);
+
+  const formatTime = (isoString?: string) => {
+    if (!isoString) return '';
+    const date = new Date(isoString);
+    if (Number.isNaN(date.getTime())) return '';
+
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const time = date.getTime();
+
+    if (time >= startOfToday) {
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+    if (time >= startOfToday - 86400000) return 'Yesterday';
+    if (time >= startOfToday - 6 * 86400000) {
+      return date.toLocaleDateString([], { weekday: 'short' });
+    }
+    return date.toLocaleDateString([], { day: '2-digit', month: '2-digit', year: 'numeric' });
+  };
+
+  const updateChatListField = async (
+    convId: string,
+    field: 'pinnedBy' | 'mutedBy' | 'archivedBy',
+    add: boolean
+  ) => {
+    if (!user) return;
+    try {
+      await updateDoc(doc(db, 'conversations', convId), {
+        [field]: add ? arrayUnion(user.uid) : arrayRemove(user.uid),
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `conversations/${convId}`);
+    }
+  };
+
+  const archivedCount = conversations.filter((c) => c.archivedBy?.includes(user?.uid || '')).length;
+
+  const chipClass = (tab: FilterTab) =>
+    `shrink-0 rounded-full px-3 py-1.5 text-[13px] font-medium transition ${
+      filterTab === tab
+        ? 'bg-[#d9fdd3] text-[#008069] dark:bg-[#103529] dark:text-[#06cf9c]'
+        : 'bg-[var(--wa-panel-2)] text-[var(--wa-text-2)] hover:bg-[var(--wa-hover)]'
+    }`;
+
+  return (
+    <div className="flex h-full w-full flex-col bg-[var(--wa-panel)]">
+      {/* Header */}
+      <header className="flex h-[60px] shrink-0 items-center justify-between bg-[var(--wa-header)] px-4">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={onOpenSettings}
+            className="relative shrink-0 rounded-full transition hover:opacity-90"
+            title="Profile & settings"
+          >
+            <img
+              src={profile?.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${user?.uid}`}
+              alt=""
+              className="h-10 w-10 rounded-full object-cover"
+            />
+            <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-[var(--wa-header)] bg-[#25d366]" />
+          </button>
+          <div className="min-w-0">
+            <h1 className="truncate text-[17px] font-semibold leading-tight text-[var(--wa-text)]">
+              Chatly
+            </h1>
+            <p className="truncate text-[11px] text-[var(--wa-text-2)]">
+              {profile?.isOnline ? 'online' : 'offline'}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1">
+          <button
+            onClick={onOpenNewChat}
+            className="flex h-10 w-10 items-center justify-center rounded-full text-[#54656f] transition hover:bg-black/5 dark:text-[#aebac1] dark:hover:bg-white/5"
+            title="New chat"
+          >
+            <Plus className="h-5 w-5" />
+          </button>
+          <button
+            onClick={onOpenStatus}
+            className="flex h-10 w-10 items-center justify-center rounded-full text-[#54656f] transition hover:bg-black/5 dark:text-[#aebac1] dark:hover:bg-white/5 md:hidden"
+            title="Status"
+          >
+            <CircleDashed className="h-5 w-5" />
+          </button>
+          <div className="relative">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowHeaderMenu((v) => !v);
+              }}
+              className="flex h-10 w-10 items-center justify-center rounded-full text-[#54656f] transition hover:bg-black/5 dark:text-[#aebac1] dark:hover:bg-white/5"
+              title="Menu"
+            >
+              <MoreVertical className="h-5 w-5" />
+            </button>
+
+            {showHeaderMenu && (
+              <div
+                className="absolute right-0 top-11 z-40 w-52 overflow-hidden rounded-lg border border-[var(--wa-border)] bg-[var(--wa-panel)] py-1.5 shadow-xl animate-scale-in"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {[
+                  { label: 'New group', icon: Users, action: onOpenNewGroup },
+                  { label: 'Status', icon: CircleDashed, action: onOpenStatus },
+                  { label: 'Channels', icon: Radio, action: onOpenChannels },
+                  { label: 'Archived chats', icon: Archive, action: () => setFilterTab('archived') },
+                  { label: 'Settings', icon: Settings, action: onOpenSettings },
+                ].map((item) => (
+                  <button
+                    key={item.label}
+                    onClick={() => {
+                      setShowHeaderMenu(false);
+                      item.action();
+                    }}
+                    className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-[13.5px] text-[var(--wa-text)] transition hover:bg-[var(--wa-hover)]"
+                  >
+                    <item.icon className="h-4 w-4 text-[var(--wa-text-2)]" />
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </header>
+
+      {/* Search */}
+      <div className="shrink-0 bg-[var(--wa-panel)] px-3 py-2">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--wa-text-2)]" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search or start new chat"
+            className="h-9 w-full rounded-lg bg-[var(--wa-panel-2)] pl-10 pr-3 text-[14px] text-[var(--wa-text)] outline-none placeholder:text-[var(--wa-text-3)] focus:ring-1 focus:ring-[#00a884]/40"
+          />
+        </div>
+      </div>
+
+      {/* Filter chips */}
+      <div className="flex shrink-0 items-center gap-2 overflow-x-auto px-3 pb-2 no-scrollbar">
+        <button className={chipClass('all')} onClick={() => setFilterTab('all')}>
+          All
+        </button>
+        <button className={chipClass('unread')} onClick={() => setFilterTab('unread')}>
+          Unread
+        </button>
+        <button className={chipClass('groups')} onClick={() => setFilterTab('groups')}>
+          Groups
+        </button>
+        <button className={chipClass('archived')} onClick={() => setFilterTab('archived')}>
+          Archived {archivedCount > 0 ? `(${archivedCount})` : ''}
+        </button>
+      </div>
+
+      {/* Chat list */}
+      <div className="flex-1 overflow-y-auto">
+        {filteredConversations.length === 0 ? (
+          <div className="flex h-full flex-col items-center justify-center px-8 text-center">
+            <MessageCircle className="mb-3 h-10 w-10 text-[var(--wa-text-3)]" />
+            <p className="text-sm font-medium text-[var(--wa-text)]">
+              {searchQuery ? 'No chats found' : 'No chats yet'}
+            </p>
+            <p className="mt-1 max-w-[230px] text-xs leading-relaxed text-[var(--wa-text-2)]">
+              {searchQuery
+                ? 'Try a different name or message.'
+                : 'Start a new chat and your conversations will appear here.'}
+            </p>
+            <button
+              onClick={onOpenNewChat}
+              className="mt-4 rounded-full bg-[#00a884] px-4 py-2 text-xs font-semibold text-white hover:bg-[#008069]"
+            >
+              New chat
+            </button>
+          </div>
+        ) : (
+          filteredConversations.map((conv) => {
+            const isGroup = conv.type === 'group';
+            const otherId = conv.participantIds.find((id) => id !== user?.uid);
+            const other = otherId ? conv.participantDetails?.[otherId] : null;
+            const isSelected = activeConversationId === conv.id;
+
+            const name = isGroup ? conv.groupInfo?.name || 'Group' : other?.displayName || 'Chat';
+            const photo = isGroup
+              ? conv.groupInfo?.photoURL || `https://api.dicebear.com/7.x/identicon/svg?seed=${conv.id}`
+              : other?.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${otherId}`;
+
+            const last = conv.lastMessage;
+            const mine = last?.senderId === user?.uid;
+            const unreadFallback =
+              last && last.senderId !== user?.uid && !last.readBy?.includes(user?.uid || '')
+                ? 1
+                : 0;
+            const unread = conv.unreadCounts?.[user?.uid || ''] || unreadFallback;
+            const isPinned = conv.pinnedBy?.includes(user?.uid || '');
+            const isMuted = conv.mutedBy?.includes(user?.uid || '');
+            const isArchived = conv.archivedBy?.includes(user?.uid || '');
+            const lastRead = last?.readBy && last.readBy.length > 1;
+
+            return (
+              <div
+                key={conv.id}
+                onClick={() => onSelectConversation(conv.id)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setMenuFor(conv.id);
+                }}
+                className={`group relative flex cursor-pointer items-center gap-3 px-3 py-2.5 transition ${
+                  isSelected
+                    ? 'bg-[var(--wa-active)]'
+                    : 'hover:bg-[var(--wa-hover)]'
+                }`}
+              >
+                <div className="relative shrink-0">
+                  <img
+                    src={photo}
+                    alt=""
+                    className="h-[49px] w-[49px] rounded-full object-cover"
+                  />
+                  {!isGroup && other?.isOnline && (
+                    <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-[var(--wa-panel)] bg-[#25d366]" />
+                  )}
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <h3 className="truncate text-[15px] font-medium text-[var(--wa-text)]">
+                      {name}
+                    </h3>
+                    <span
+                      className={`shrink-0 text-[11px] ${
+                        unread > 0 ? 'font-medium text-[#00a884]' : 'text-[var(--wa-text-2)]'
+                      }`}
+                    >
+                      {formatTime(last?.timestamp || conv.updatedAt)}
+                    </span>
+                  </div>
+
+                  <div className="mt-0.5 flex items-center justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-1 text-[13px] text-[var(--wa-text-2)]">
+                      {mine && last && (
+                        <CheckCheck
+                          className={`h-[15px] w-[15px] shrink-0 ${
+                            lastRead ? 'text-[#53bdeb]' : 'text-[var(--wa-text-3)]'
+                          }`}
+                        />
+                      )}
+                      {isGroup && last && !mine && (
+                        <span className="shrink-0 text-[var(--wa-text-2)]">
+                          {last.senderName ? `${last.senderName}: ` : ''}
+                        </span>
+                      )}
+                      <span className="truncate">
+                        {last?.text || 'No messages yet'}
+                      </span>
+                    </div>
+
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      {isMuted && <BellOff className="h-3.5 w-3.5 text-[var(--wa-text-3)]" />}
+                      {isPinned && <Pin className="h-3.5 w-3.5 text-[var(--wa-text-3)]" />}
+                      {unread > 0 && (
+                        <span className="flex h-[19px] min-w-[19px] items-center justify-center rounded-full bg-[#25d366] px-1.5 text-[11px] font-semibold text-white">
+                          {unread > 99 ? '99+' : unread}
+                        </span>
+                      )}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setMenuFor(menuFor === conv.id ? null : conv.id);
+                        }}
+                        className="flex h-7 w-7 items-center justify-center rounded-full text-[var(--wa-text-2)] opacity-0 transition hover:bg-black/10 group-hover:opacity-100 dark:hover:bg-white/10"
+                        title="Chat options"
+                      >
+                        <MoreVertical className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {menuFor === conv.id && (
+                  <div
+                    className="absolute right-3 top-12 z-40 w-44 overflow-hidden rounded-lg border border-[var(--wa-border)] bg-[var(--wa-panel)] py-1.5 shadow-xl animate-scale-in"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      onClick={() => {
+                        updateChatListField(conv.id, 'pinnedBy', !isPinned);
+                        setMenuFor(null);
+                      }}
+                      className="flex w-full items-center gap-3 px-4 py-2 text-left text-[13px] text-[var(--wa-text)] hover:bg-[var(--wa-hover)]"
+                    >
+                      <Pin className="h-4 w-4 text-[var(--wa-text-2)]" />
+                      {isPinned ? 'Unpin chat' : 'Pin chat'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        updateChatListField(conv.id, 'mutedBy', !isMuted);
+                        setMenuFor(null);
+                      }}
+                      className="flex w-full items-center gap-3 px-4 py-2 text-left text-[13px] text-[var(--wa-text)] hover:bg-[var(--wa-hover)]"
+                    >
+                      <BellOff className="h-4 w-4 text-[var(--wa-text-2)]" />
+                      {isMuted ? 'Unmute notifications' : 'Mute notifications'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        updateChatListField(conv.id, 'archivedBy', !isArchived);
+                        setMenuFor(null);
+                      }}
+                      className="flex w-full items-center gap-3 px-4 py-2 text-left text-[13px] text-[var(--wa-text)] hover:bg-[var(--wa-hover)]"
+                    >
+                      {isArchived ? (
+                        <ArchiveRestore className="h-4 w-4 text-[var(--wa-text-2)]" />
+                      ) : (
+                        <Archive className="h-4 w-4 text-[var(--wa-text-2)]" />
+                      )}
+                      {isArchived ? 'Unarchive chat' : 'Archive chat'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        onSelectConversation(conv.id);
+                        setMenuFor(null);
+                      }}
+                      className="flex w-full items-center gap-3 px-4 py-2 text-left text-[13px] text-[var(--wa-text)] hover:bg-[var(--wa-hover)]"
+                    >
+                      <Check className="h-4 w-4 text-[var(--wa-text-2)]" />
+                      Open chat
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* Footer hint */}
+      <div className="flex shrink-0 items-center justify-between border-t border-[var(--wa-border)] px-4 py-2.5 text-[11px] text-[var(--wa-text-2)]">
+        <span className="flex items-center gap-1.5">
+          <span className="h-1.5 w-1.5 rounded-full bg-[#25d366]" />
+          Real-time synced
+        </span>
+        <button onClick={onOpenNewGroup} className="font-medium text-[#00a884] hover:underline">
+          New group
+        </button>
+      </div>
+    </div>
+  );
+}

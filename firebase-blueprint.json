@@ -1,0 +1,181 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Unique user ID" },
+        "email": { "type": "string", "description": "User email address" },
+        "displayName": { "type": "string", "description": "Full user display name", "maxLength": 100 },
+        "username": { "type": "string", "description": "Unique username handle", "maxLength": 50 },
+        "photoURL": { "type": "string", "description": "URL of user avatar", "maxLength": 1000 },
+        "bio": { "type": "string", "description": "Short user bio / about", "maxLength": 280 },
+        "isOnline": { "type": "boolean", "description": "Online presence flag" },
+        "lastSeen": { "type": "string", "description": "ISO timestamp of last seen" },
+        "createdAt": { "type": "string", "description": "Creation timestamp" },
+        "updatedAt": { "type": "string", "description": "Last update timestamp" }
+      },
+      "required": ["uid", "email", "displayName", "username"]
+    },
+    "Conversation": {
+      "title": "Conversation",
+      "description": "Direct message or group chat conversation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique conversation ID" },
+        "type": { "type": "string", "enum": ["direct", "group"], "description": "Conversation type" },
+        "participantIds": { "type": "array", "description": "Array of participant user IDs" },
+        "lastMessageText": { "type": "string", "description": "Preview of last message", "maxLength": 500 },
+        "lastMessageSenderId": { "type": "string", "description": "User ID of last message sender" },
+        "lastMessageTimestamp": { "type": "string", "description": "Timestamp of last message" },
+        "lastMessageType": { "type": "string", "description": "Type of last message" },
+        "groupName": { "type": "string", "description": "Name if group chat", "maxLength": 100 },
+        "groupPhotoURL": { "type": "string", "description": "Group photo URL", "maxLength": 1000 },
+        "groupDescription": { "type": "string", "description": "Group description", "maxLength": 500 },
+        "adminIds": { "type": "array", "description": "Admin user IDs for group" },
+        "createdBy": { "type": "string", "description": "User ID who created the conversation" },
+        "createdAt": { "type": "string", "description": "Creation timestamp" },
+        "updatedAt": { "type": "string", "description": "Last activity timestamp" }
+      },
+      "required": ["id", "type", "participantIds", "createdAt", "updatedAt"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "Chat message inside a conversation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique message ID" },
+        "conversationId": { "type": "string", "description": "Target conversation ID" },
+        "senderId": { "type": "string", "description": "Sender user ID" },
+        "senderName": { "type": "string", "description": "Sender display name" },
+        "senderPhoto": { "type": "string", "description": "Sender avatar URL" },
+        "text": { "type": "string", "description": "Message text content", "maxLength": 5000 },
+        "mediaUrl": { "type": "string", "description": "Attachment URL" },
+        "mediaType": { "type": "string", "description": "Type of media attached" },
+        "fileName": { "type": "string", "description": "Attached file name", "maxLength": 255 },
+        "fileSize": { "type": "number", "description": "Size in bytes" },
+        "replyToId": { "type": "string", "description": "Replied message ID" },
+        "replyToText": { "type": "string", "description": "Replied message preview", "maxLength": 200 },
+        "replyToSender": { "type": "string", "description": "Replied message sender name", "maxLength": 100 },
+        "readBy": { "type": "array", "description": "List of user IDs who read the message" },
+        "deliveredTo": { "type": "array", "description": "List of user IDs who received delivery" },
+        "isEdited": { "type": "boolean", "description": "Whether message was edited" },
+        "isDeleted": { "type": "boolean", "description": "Whether message was deleted for everyone" },
+        "pinned": { "type": "boolean", "description": "Whether message is pinned" },
+        "createdAt": { "type": "string", "description": "Creation timestamp" },
+        "updatedAt": { "type": "string", "description": "Update timestamp" }
+      },
+      "required": ["id", "conversationId", "senderId", "createdAt"]
+    },
+    "Status": {
+      "title": "Status",
+      "description": "24-hour disappearing status story",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique status ID" },
+        "userId": { "type": "string", "description": "Owner user ID" },
+        "userName": { "type": "string", "description": "Owner user display name" },
+        "userPhoto": { "type": "string", "description": "Owner user avatar URL" },
+        "type": { "type": "string", "enum": ["text", "image", "video"], "description": "Status content type" },
+        "content": { "type": "string", "description": "Text content or media URL", "maxLength": 2000 },
+        "caption": { "type": "string", "description": "Optional caption for media", "maxLength": 500 },
+        "backgroundColor": { "type": "string", "description": "Background color for text status", "maxLength": 50 },
+        "viewers": { "type": "array", "description": "User IDs who viewed this status" },
+        "createdAt": { "type": "string", "description": "Creation timestamp" },
+        "expiresAt": { "type": "string", "description": "Expiration timestamp" }
+      },
+      "required": ["id", "userId", "type", "content", "createdAt", "expiresAt"]
+    },
+    "Channel": {
+      "title": "Channel",
+      "description": "Public or broadcast channel",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique channel ID" },
+        "name": { "type": "string", "description": "Channel name", "maxLength": 100 },
+        "description": { "type": "string", "description": "Channel description", "maxLength": 500 },
+        "photoURL": { "type": "string", "description": "Channel image URL" },
+        "ownerId": { "type": "string", "description": "Creator user ID" },
+        "subscribers": { "type": "array", "description": "Array of subscriber user IDs" },
+        "subscriberCount": { "type": "number", "description": "Total subscriber count" },
+        "createdAt": { "type": "string", "description": "Creation timestamp" }
+      },
+      "required": ["id", "name", "ownerId", "createdAt"]
+    },
+    "ChannelPost": {
+      "title": "ChannelPost",
+      "description": "Post published to a channel",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique post ID" },
+        "channelId": { "type": "string", "description": "Target channel ID" },
+        "authorId": { "type": "string", "description": "Author user ID" },
+        "title": { "type": "string", "description": "Post headline/title", "maxLength": 200 },
+        "content": { "type": "string", "description": "Post text content", "maxLength": 5000 },
+        "mediaUrl": { "type": "string", "description": "Optional media attachment URL" },
+        "mediaType": { "type": "string", "description": "Media type" },
+        "createdAt": { "type": "string", "description": "Creation timestamp" }
+      },
+      "required": ["id", "channelId", "authorId", "content", "createdAt"]
+    },
+    "Call": {
+      "title": "Call",
+      "description": "WebRTC voice/video call session",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique call ID" },
+        "callerId": { "type": "string", "description": "Caller user ID" },
+        "callerName": { "type": "string", "description": "Caller display name" },
+        "callerPhoto": { "type": "string", "description": "Caller photo URL" },
+        "receiverId": { "type": "string", "description": "Receiver user ID" },
+        "receiverName": { "type": "string", "description": "Receiver display name" },
+        "receiverPhoto": { "type": "string", "description": "Receiver photo URL" },
+        "callType": { "type": "string", "enum": ["audio", "video"], "description": "Call mode" },
+        "status": { "type": "string", "enum": ["calling", "ringing", "ongoing", "ended", "rejected", "missed"], "description": "Call status" },
+        "duration": { "type": "number", "description": "Call duration in seconds" },
+        "createdAt": { "type": "string", "description": "Creation timestamp" },
+        "endedAt": { "type": "string", "description": "End timestamp" }
+      },
+      "required": ["id", "callerId", "receiverId", "callType", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Public and searchable user profile documents"
+    },
+    "/conversations/{conversationId}": {
+      "schema": { "$ref": "#/entities/Conversation" },
+      "description": "One-to-one and group conversation threads"
+    },
+    "/conversations/{conversationId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/Message" },
+      "description": "Individual messages inside a conversation"
+    },
+    "/statuses/{statusId}": {
+      "schema": { "$ref": "#/entities/Status" },
+      "description": "24h status stories created by users"
+    },
+    "/channels/{channelId}": {
+      "schema": { "$ref": "#/entities/Channel" },
+      "description": "Public and broadcast channels"
+    },
+    "/channels/{channelId}/posts/{postId}": {
+      "schema": { "$ref": "#/entities/ChannelPost" },
+      "description": "Updates published to a channel"
+    },
+    "/calls/{callId}": {
+      "schema": { "$ref": "#/entities/Call" },
+      "description": "Active and historical voice/video calls"
+    },
+    "/calls/{callId}/callerCandidates/{candidateId}": {
+      "schema": { "type": "object", "properties": { "candidate": { "type": "object" } } },
+      "description": "WebRTC ICE candidates from caller"
+    },
+    "/calls/{callId}/receiverCandidates/{candidateId}": {
+      "schema": { "type": "object", "properties": { "candidate": { "type": "object" } } },
+      "description": "WebRTC ICE candidates from receiver"
+    }
+  }
+}
