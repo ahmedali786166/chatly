@@ -48,19 +48,34 @@ export async function compressImage(file: File | Blob, maxDimension = MAX_IMAGE_
   }
 }
 
+// If Storage is not provisioned the SDK keeps retrying CORS failures for a
+// long time without ever rejecting, so cap the wait and fall back below.
+const STORAGE_TIMEOUT_MS = 12000;
+
 async function uploadToStorage(file: Blob, path: string, onProgress?: UploadProgressCallback) {
   const storageRef = ref(storage, path);
   const uploadTask = uploadBytesResumable(storageRef, file);
 
   await new Promise<void>((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      uploadTask.cancel();
+      reject(new Error('Storage request timed out'));
+    }, STORAGE_TIMEOUT_MS);
+
     uploadTask.on(
       'state_changed',
       (snapshot) => {
         const progress = (snapshot.bytesTransferred / Math.max(1, snapshot.totalBytes)) * 100;
         if (onProgress) onProgress(Math.min(99, Math.round(progress)));
       },
-      (error) => reject(error),
-      () => resolve()
+      (error) => {
+        window.clearTimeout(timer);
+        reject(error);
+      },
+      () => {
+        window.clearTimeout(timer);
+        resolve();
+      }
     );
   });
 
