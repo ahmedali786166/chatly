@@ -131,20 +131,20 @@ export async function uploadFile(
 ): Promise<string> {
   const prepared = await compressImage(file);
 
+  if (cloudinaryConfigured()) {
+    try {
+      return await uploadToCloudinary(prepared, path, onProgress);
+    } catch (error) {
+      console.warn('Cloudinary upload failed, trying Firebase Storage:', error);
+    }
+  }
+
   try {
     const url = await uploadToStorage(prepared, path, onProgress);
     if (onProgress) onProgress(100);
     return url;
   } catch (error) {
-    console.warn('Firebase Storage upload unavailable, trying next option:', error);
-  }
-
-  if (cloudinaryConfigured()) {
-    try {
-      return await uploadToCloudinary(prepared, path, onProgress);
-    } catch (error) {
-      console.warn('Cloudinary upload failed, using inline media fallback:', error);
-    }
+    console.warn('Firebase Storage upload unavailable, using inline media fallback:', error);
   }
 
   const dataUrl = await fileToDataUrl(prepared);
