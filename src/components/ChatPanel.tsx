@@ -303,13 +303,15 @@ export function ChatPanel({
         readBy: [user.uid],
         deliveredTo: [user.uid],
         createdAt: now,
-        replyTo: replyingTo
+        ...(replyingTo
           ? {
-              id: replyingTo.id,
-              senderName: replyingTo.senderName,
-              text: replyingTo.text ? replyingTo.text.slice(0, 120) : 'Attachment',
+              replyTo: {
+                id: replyingTo.id,
+                senderName: replyingTo.senderName,
+                text: replyingTo.text ? replyingTo.text.slice(0, 120) : 'Attachment',
+              },
             }
-          : undefined,
+          : {}),
       });
 
       await updateDoc(doc(db, 'conversations', conversation.id), {

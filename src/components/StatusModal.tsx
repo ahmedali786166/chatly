@@ -164,7 +164,7 @@ export function StatusModal({ onClose, onReplyToStatus }: StatusModalProps) {
         userPhoto: profile.photoURL,
         type: isVideo ? 'video' : 'image',
         content: mediaUrl,
-        caption: caption.trim() || undefined,
+        ...(caption.trim() ? { caption: caption.trim() } : {}),
         viewers: [],
         createdAt: now.toISOString(),
         expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString(),

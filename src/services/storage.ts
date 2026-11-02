@@ -8,6 +8,42 @@ export interface UploadProgressCallback {
 const MAX_INLINE_BYTES = 700 * 1024;
 const MAX_IMAGE_DIMENSION = 1600;
 
+// Free Cloudinary tier for files too big to inline into Firestore.
+// Setup: cloudinary.com free account → Settings → Upload → Upload presets →
+// Add preset → Signing mode: "Unsigned" → save. Paste the cloud name and
+// preset name below. Both are public-by-design client values (unsigned
+// uploads are meant to be called from the browser), so committing them is safe.
+const CLOUDINARY_CLOUD_NAME = '';
+const CLOUDINARY_UPLOAD_PRESET = '';
+
+const cloudinaryConfigured = () =>
+  CLOUDINARY_CLOUD_NAME.length > 0 && CLOUDINARY_UPLOAD_PRESET.length > 0;
+
+async function uploadToCloudinary(
+  file: Blob,
+  path: string,
+  onProgress?: UploadProgressCallback
+): Promise<string> {
+  const filename = path.split('/').pop() || 'file';
+  const form = new FormData();
+  form.append('file', file, filename);
+  form.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+  form.append('public_id', path.replace(/\.[a-z0-9]+$/i, '').replace(/[^\w\-/]+/g, '_'));
+
+  const response = await fetch(
+    `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/auto/upload`,
+    { method: 'POST', body: form }
+  );
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new Error(`Cloudinary upload failed (${response.status}): ${detail.slice(0, 160)}`);
+  }
+  const data = (await response.json()) as { secure_url?: string };
+  if (!data.secure_url) throw new Error('Cloudinary returned no URL');
+  if (onProgress) onProgress(100);
+  return data.secure_url;
+}
+
 /**
  * Downscales large photos before upload so chat media stays fast on mobile
  * and still fits inside a Firestore document if Storage is unavailable.
@@ -84,9 +120,9 @@ async function uploadToStorage(file: Blob, path: string, onProgress?: UploadProg
 
 /**
  * Uploads media to Firebase Storage. If Storage is not provisioned or rules
- * reject the write, small files fall back to inline data URLs so sending never
- * breaks, while oversized files surface a clear error instead of corrupting a
- * Firestore document.
+ * reject the write, the file goes to Cloudinary when configured, otherwise
+ * small files fall back to inline data URLs so sending never breaks; oversized
+ * files surface a clear error instead of corrupting a Firestore document.
  */
 export async function uploadFile(
   file: File | Blob,
@@ -100,17 +136,25 @@ export async function uploadFile(
     if (onProgress) onProgress(100);
     return url;
   } catch (error) {
-    console.warn('Storage upload unavailable, using inline media fallback:', error);
-
-    const dataUrl = await fileToDataUrl(prepared);
-    if (dataUrl.length * 0.75 > MAX_INLINE_BYTES) {
-      throw new Error(
-        'This file is too large to send right now. Please choose a smaller photo or document.'
-      );
-    }
-    if (onProgress) onProgress(100);
-    return dataUrl;
+    console.warn('Firebase Storage upload unavailable, trying next option:', error);
   }
+
+  if (cloudinaryConfigured()) {
+    try {
+      return await uploadToCloudinary(prepared, path, onProgress);
+    } catch (error) {
+      console.warn('Cloudinary upload failed, using inline media fallback:', error);
+    }
+  }
+
+  const dataUrl = await fileToDataUrl(prepared);
+  if (dataUrl.length * 0.75 > MAX_INLINE_BYTES) {
+    throw new Error(
+      'This file is too large to send right now. Please choose a smaller photo or document.'
+    );
+  }
+  if (onProgress) onProgress(100);
+  return dataUrl;
 }
 
 export function fileToDataUrl(file: File | Blob): Promise<string> {

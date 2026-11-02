@@ -222,7 +222,7 @@ export function MessageItem({
                     <img
                       src={message.mediaUrl}
                       alt="Shared photo"
-                      className="max-h-80 w-full max-w-sm cursor-pointer object-cover transition hover:opacity-95"
+                      className="h-auto max-h-72 w-auto max-w-[300px] cursor-pointer object-contain transition hover:opacity-95"
                       onClick={() => window.open(message.mediaUrl, '_blank')}
                     />
                   </div>
