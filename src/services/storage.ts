@@ -13,8 +13,8 @@ const MAX_IMAGE_DIMENSION = 1600;
 // Add preset → Signing mode: "Unsigned" → save. Paste the cloud name and
 // preset name below. Both are public-by-design client values (unsigned
 // uploads are meant to be called from the browser), so committing them is safe.
-const CLOUDINARY_CLOUD_NAME = '';
-const CLOUDINARY_UPLOAD_PRESET = '';
+const CLOUDINARY_CLOUD_NAME = 'ofewcx2t';
+const CLOUDINARY_UPLOAD_PRESET = 'chatly';
 
 const cloudinaryConfigured = () =>
   CLOUDINARY_CLOUD_NAME.length > 0 && CLOUDINARY_UPLOAD_PRESET.length > 0;

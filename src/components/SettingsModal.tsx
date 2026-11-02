@@ -15,7 +15,10 @@ import {
   Sun,
   ChevronRight,
   MessageCircle,
+  Trash2,
+  AlertTriangle,
 } from 'lucide-react';
+import { deleteUserAccount } from '../services/account';
 
 interface SettingsModalProps {
   onClose: () => void;
@@ -54,6 +57,38 @@ export function SettingsModal({ onClose, currentTheme, setTheme }: SettingsModal
   const [readReceipts, setReadReceipts] = useState(profile?.readReceipts ?? true);
   const [saving, setSaving] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDeleteAccount = async () => {
+    if (!user) return;
+    setDeleting(true);
+    try {
+      await deleteUserAccount(user);
+      addToast({ type: 'success', title: 'Account deleted', message: 'Your account and data were removed.' });
+      setConfirmDelete(false);
+      logout();
+      onClose();
+    } catch (err: unknown) {
+      const code = typeof err === 'object' && err !== null && 'code' in err ? String((err as { code?: string }).code) : '';
+      if (code === 'auth/requires-recent-login') {
+        addToast({
+          type: 'warning',
+          title: 'Log in again first',
+          message: 'For security, log out and log back in, then delete your account.',
+        });
+      } else {
+        addToast({
+          type: 'error',
+          title: 'Could not delete account',
+          message: err instanceof Error ? err.message : 'Please try again.',
+        });
+      }
+      setConfirmDelete(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const handleAvatarSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0 || !user) return;
@@ -231,6 +266,14 @@ export function SettingsModal({ onClose, currentTheme, setTheme }: SettingsModal
             >
               <LogOut className="h-5 w-5 shrink-0" />
               <span className="text-[14.5px]">Log out</span>
+            </button>
+
+            <button
+              onClick={() => setConfirmDelete(true)}
+              className="flex w-full items-center gap-3 px-4 py-3 text-left text-[#ea0038] transition hover:bg-[var(--wa-hover)]"
+            >
+              <Trash2 className="h-5 w-5 shrink-0" />
+              <span className="text-[14.5px]">Delete account</span>
             </button>
           </nav>
         </div>
@@ -488,6 +531,39 @@ export function SettingsModal({ onClose, currentTheme, setTheme }: SettingsModal
           </div>
         </div>
       </div>
+
+      {confirmDelete && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4 animate-fade-in">
+          <div className="w-full max-w-sm rounded-xl bg-[var(--wa-panel)] p-5 shadow-2xl animate-scale-in">
+            <div className="flex items-center gap-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#ea0038]/10">
+                <AlertTriangle className="h-5 w-5 text-[#ea0038]" />
+              </span>
+              <h3 className="text-[16px] font-medium text-[var(--wa-text)]">Delete account?</h3>
+            </div>
+            <p className="mt-3 text-[13.5px] leading-6 text-[var(--wa-text-2)]">
+              This permanently deletes your profile, statuses, channels and all your conversations.
+              This cannot be undone.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={() => setConfirmDelete(false)}
+                disabled={deleting}
+                className="rounded-full px-4 py-2 text-[14px] text-[var(--wa-text-2)] transition hover:bg-[var(--wa-hover)] hover:text-[var(--wa-text)]"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteAccount}
+                disabled={deleting}
+                className="rounded-full bg-[#ea0038] px-4 py-2 text-[14px] font-medium text-white transition hover:opacity-90 disabled:opacity-60"
+              >
+                {deleting ? 'Deleting…' : 'Delete my account'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
