@@ -1,7 +1,6 @@
 import { cert, getApps, initializeApp } from 'firebase-admin/app';
 import type { ServiceAccount } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
-import { getAuth } from 'firebase-admin/auth';
 
 // Status media tokens expire 10 minutes after upload, so expired assets can
 // only be removed with the Admin API. This endpoint runs from Vercel (cron and
@@ -42,17 +41,7 @@ function database() {
 
 async function authorized(req: ApiRequest) {
   const header = req.headers.authorization;
-  if (CRON_SECRET && header === `Bearer ${CRON_SECRET}`) return true;
-  const token = req.headers['x-firebase-token'];
-  if (typeof token === 'string' && token) {
-    try {
-      await getAuth().verifyIdToken(token);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-  return false;
+  return Boolean(CRON_SECRET) && header === `Bearer ${CRON_SECRET}`;
 }
 
 async function deleteCloudinaryAsset(publicId: string, resourceType?: string) {

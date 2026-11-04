@@ -119,19 +119,6 @@ export function StatusModal({ onClose, onReplyToStatus }: StatusModalProps) {
           void cleanupStory(story);
         });
 
-        // Cloudinary delete tokens expire after 10 minutes, so ask the Vercel
-        // cleanup endpoint (Admin API) to remove expired media as well.
-        if (expired.length > 0 && user) {
-          void user
-            .getIdToken()
-            .then((token) =>
-              fetch('/api/cleanup-statuses', {
-                headers: { 'x-firebase-token': token },
-              })
-            )
-            .catch(() => {});
-        }
-
         const active = all
           .filter((story) => !isExpired(story))
           .sort(
