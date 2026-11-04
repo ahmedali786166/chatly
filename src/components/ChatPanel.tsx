@@ -630,7 +630,7 @@ export function ChatPanel({
   return (
     <div className="relative flex h-full flex-1 flex-col overflow-hidden bg-[var(--wa-chat)]">
       {/* Chat header */}
-      <header className="z-20 flex h-[60px] shrink-0 items-center justify-between border-b border-[var(--wa-border)] bg-[var(--wa-header)] px-3 md:px-4">
+      <header className="sticky top-0 z-30 flex h-[60px] shrink-0 items-center justify-between border-b border-[var(--wa-border)] bg-[var(--wa-header)] px-3 md:px-4">
         <div className="flex min-w-0 items-center gap-2 md:gap-3">
           {onBackMobile && (
             <button
