@@ -11,6 +11,7 @@ import {
   query,
   limit,
   updateDoc,
+  writeBatch,
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase/config';
 import { useAuth } from '../context/AuthContext';
@@ -25,6 +26,7 @@ import { formatTime12, startOfToday, isSameDay, toDate } from '../lib/time';
 import { onAvatarError } from '../lib/avatar';
 import { uploadFile } from '../services/storage';
 import { sounds } from '../services/sound';
+import { notifyRecipients } from '../services/push';
 import {
   Phone,
   Video,
@@ -113,6 +115,10 @@ export function ChatPanel({
   const [uploadProgress, setUploadProgress] = useState(0);
   const [showPhoto, setShowPhoto] = useState(false);
   const [showContactDialog, setShowContactDialog] = useState(false);
+  const [isOnline, setIsOnline] = useState(() => navigator.onLine);
+  const [isVisible, setIsVisible] = useState(
+    () => document.visibilityState === 'visible'
+  );
 
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
@@ -144,6 +150,23 @@ export function ChatPanel({
     );
   const isOtherTyping = typingUsers.length > 0;
 
+  // Track connectivity and tab visibility. Receipts must never be written
+  // while offline (Firestore would queue them and flush later, showing the
+  // sender "delivered/seen" even though the user never opened the chat).
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    const handleVisibility = () => setIsVisible(document.visibilityState === 'visible');
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, []);
+
   // Messages stream
   useEffect(() => {
     const messagesCol = collection(db, 'conversations', conversation.id, 'messages');
@@ -155,20 +178,6 @@ export function ChatPanel({
         const list: Message[] = [];
         snapshot.forEach((d) => list.push({ id: d.id, ...d.data() } as Message));
         setMessages(list);
-
-        if (user) {
-          snapshot.docs.forEach((docSnap) => {
-            const data = docSnap.data() as Message;
-            if (data.senderId !== user.uid) {
-              const updates: Record<string, unknown> = {};
-              if (!data.readBy?.includes(user.uid)) updates.readBy = arrayUnion(user.uid);
-              if (!data.deliveredTo?.includes(user.uid)) updates.deliveredTo = arrayUnion(user.uid);
-              if (Object.keys(updates).length > 0) {
-                updateDoc(docSnap.ref, updates).catch(() => {});
-              }
-            }
-          });
-        }
       },
       (err) => {
         handleFirestoreError(err, OperationType.LIST, `conversations/${conversation.id}/messages`);
@@ -176,22 +185,80 @@ export function ChatPanel({
     );
 
     return () => unsubscribe();
-  }, [conversation.id, user]);
+  }, [conversation.id]);
 
-  // Clear unread badge when the chat is open
+  // Delivery receipts: only while the device is truly online.
   useEffect(() => {
-    if (!user) return;
+    if (!user || !isOnline) return;
+
+    const last = conversation.lastMessage;
+    if (
+      last &&
+      last.senderId !== user.uid &&
+      !last.deliveredTo?.includes(user.uid)
+    ) {
+      updateDoc(doc(db, 'conversations', conversation.id), {
+        'lastMessage.deliveredTo': arrayUnion(user.uid),
+      }).catch(() => {});
+    }
+
+    const pending = messages.filter(
+      (m) => m.senderId !== user.uid && !m.deliveredTo?.includes(user.uid)
+    );
+    if (pending.length === 0) return;
+    const batch = writeBatch(db);
+    pending.forEach((m) => {
+      batch.update(doc(db, 'conversations', conversation.id, 'messages', m.id), {
+        deliveredTo: arrayUnion(user.uid),
+      });
+    });
+    batch.commit().catch(() => {});
+  }, [messages, isOnline, conversation.id, conversation.lastMessage, user]);
+
+  // Read receipts: only while online AND the chat is actually on screen.
+  useEffect(() => {
+    if (!user || !isOnline || !isVisible) return;
+    if (profile?.readReceipts === false) return;
+    const pending = messages.filter(
+      (m) => m.senderId !== user.uid && !m.readBy?.includes(user.uid)
+    );
+    if (pending.length === 0) return;
+    const batch = writeBatch(db);
+    pending.forEach((m) => {
+      batch.update(doc(db, 'conversations', conversation.id, 'messages', m.id), {
+        readBy: arrayUnion(user.uid),
+        deliveredTo: arrayUnion(user.uid),
+      });
+    });
+    batch.commit().catch(() => {});
+  }, [messages, isOnline, isVisible, conversation.id, profile?.readReceipts, user]);
+
+  // Clear unread badge only when the chat is open and visible.
+  useEffect(() => {
+    if (!user || !isOnline || !isVisible) return;
     const unread = conversation.unreadCounts?.[user.uid];
-    const lastUnread = conversation.lastMessage && !conversation.lastMessage.readBy?.includes(user.uid);
+    const lastUnread =
+      conversation.lastMessage && !conversation.lastMessage.readBy?.includes(user.uid);
 
     if (unread || lastUnread) {
       const updates: Record<string, unknown> = { [`unreadCounts.${user.uid}`]: 0 };
       if (conversation.lastMessage) {
-        updates['lastMessage.readBy'] = arrayUnion(user.uid);
+        if (profile?.readReceipts !== false) {
+          updates['lastMessage.readBy'] = arrayUnion(user.uid);
+        }
+        updates['lastMessage.deliveredTo'] = arrayUnion(user.uid);
       }
       updateDoc(doc(db, 'conversations', conversation.id), updates).catch(() => {});
     }
-  }, [conversation.id, conversation.unreadCounts?.[user?.uid || ''], conversation.lastMessage?.timestamp, user]);
+  }, [
+    conversation.id,
+    conversation.unreadCounts?.[user?.uid || ''],
+    conversation.lastMessage?.timestamp,
+    isOnline,
+    isVisible,
+    profile?.readReceipts,
+    user,
+  ]);
 
   // Auto-scroll on new messages. Scroll the message pane itself so mobile
   // browsers never scroll the whole page (which hides the chat header).
@@ -255,6 +322,16 @@ export function ChatPanel({
         updates[`unreadCounts.${id}`] = increment(1);
       });
     return updates;
+  };
+
+  const sendPushPing = async () => {
+    if (!user) return;
+    try {
+      const idToken = await user.getIdToken();
+      await notifyRecipients({ conversationId: conversation.id }, idToken);
+    } catch (error) {
+      console.warn('Push ping failed:', error);
+    }
   };
 
   const handleScroll = () => {
@@ -335,6 +412,7 @@ export function ChatPanel({
       });
 
       if (profile.soundEnabled !== false) sounds.playSent();
+      void sendPushPing();
       setReplyingTo(null);
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, 'messages');
@@ -407,6 +485,7 @@ export function ChatPanel({
       });
 
       if (profile.soundEnabled !== false) sounds.playSent();
+      void sendPushPing();
     } catch (err) {
       addToast({
         title: 'Upload failed',
@@ -479,6 +558,7 @@ export function ChatPanel({
           });
 
           if (profile.soundEnabled !== false) sounds.playSent();
+          void sendPushPing();
         } catch (err) {
           addToast({
             title: 'Voice note failed',
@@ -665,11 +745,11 @@ export function ChatPanel({
             </button>
 
             <button onClick={onToggleRightSidebar} className="min-w-0 text-left">
-              <h2 className="truncate text-[16px] font-medium leading-tight text-[var(--wa-text)]">
+              <h2 className="truncate text-[17px] font-normal leading-[22px] text-[var(--wa-text)]">
                 {isGroup ? conversation.groupInfo?.name || 'Group' : otherName}
               </h2>
               <p
-                className={`truncate text-[12.5px] ${
+                className={`truncate text-[13px] leading-4 ${
                   isOtherTyping ? 'text-[#00a884]' : 'text-[var(--wa-text-2)]'
                 }`}
               >
@@ -688,7 +768,7 @@ export function ChatPanel({
                   className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-full text-[var(--wa-text-2)] transition hover:bg-black/5 min-[400px]:flex dark:hover:bg-white/5"
                   title="Add to contacts"
                 >
-                  <UserPlus className="h-5 w-5" />
+                  <UserPlus className="h-6 w-6" />
                 </button>
               )}
               <button
@@ -696,14 +776,14 @@ export function ChatPanel({
                 className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[var(--wa-text-2)] transition hover:bg-black/5 dark:hover:bg-white/5"
                 title="Video call"
               >
-                <Video className="h-5 w-5" />
+                <Video className="h-6 w-6" />
               </button>
               <button
                 onClick={() => startCall(otherUserId, otherName, otherPhoto, 'audio')}
                 className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[var(--wa-text-2)] transition hover:bg-black/5 dark:hover:bg-white/5"
                 title="Voice call"
               >
-                <Phone className="h-5 w-5" />
+                <Phone className="h-6 w-6" />
               </button>
             </>
           )}
@@ -715,7 +795,7 @@ export function ChatPanel({
             }`}
             title="Search in chat"
           >
-            <Search className="h-5 w-5" />
+            <Search className="h-[22px] w-[22px]" />
           </button>
 
           <button
@@ -725,7 +805,7 @@ export function ChatPanel({
             }`}
             title="Chat info"
           >
-            <MoreVertical className="h-5 w-5" />
+            <MoreVertical className="h-[22px] w-[22px]" />
           </button>
         </div>
       </header>
@@ -956,7 +1036,7 @@ export function ChatPanel({
               className="flex h-10 w-10 items-center justify-center rounded-full bg-[#00a884] text-white hover:bg-[#008069]"
               title="Send voice note"
             >
-              <Send className="h-5 w-5" />
+              <Send className="h-6 w-6" />
             </button>
           </div>
         ) : (
@@ -986,7 +1066,7 @@ export function ChatPanel({
               }`}
               title="Attach"
             >
-              <Paperclip className="h-[22px] w-[22px]" />
+              <Paperclip className="h-6 w-6" />
             </button>
 
             <div className="flex flex-1 items-end rounded-lg bg-[var(--wa-panel)] px-3 py-2">
@@ -1007,7 +1087,7 @@ export function ChatPanel({
                 }}
                 placeholder={isBlocked ? 'Unblock this contact to send messages' : 'Type a message'}
                 disabled={isBlocked}
-                className="max-h-[120px] w-full resize-none bg-transparent text-[14.5px] leading-6 text-[var(--wa-text)] outline-none placeholder:text-[var(--wa-text-3)] disabled:cursor-not-allowed"
+                className="max-h-[120px] w-full resize-none bg-transparent text-[15px] leading-6 text-[var(--wa-text)] outline-none placeholder:text-[var(--wa-text-3)] disabled:cursor-not-allowed"
               />
             </div>
 
@@ -1018,7 +1098,7 @@ export function ChatPanel({
                 className="mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#00a884] text-white transition hover:bg-[#008069] disabled:opacity-50"
                 title={editingMessage ? 'Save edit' : 'Send'}
               >
-                <Send className="h-5 w-5" />
+                <Send className="h-6 w-6" />
               </button>
             ) : (
               <button

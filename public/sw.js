@@ -2,7 +2,7 @@
    Caches only same-origin static assets. Firebase, Cloudinary, Google Fonts
    and every other cross-origin request are never intercepted, so private chat
    data can never end up in the cache. */
-const CACHE_NAME = 'chatly-static-v1';
+const CACHE_NAME = 'chatly-static-v2';
 const PRECACHE = [
   '/',
   '/offline.html',
@@ -64,5 +64,60 @@ self.addEventListener('fetch', (event) => {
         return response;
       });
     })
+  );
+});
+
+/* Push notifications — delivered even when the app is closed. */
+self.addEventListener('push', (event) => {
+  let payload = {};
+  try {
+    payload = event.data ? event.data.json() : {};
+  } catch {
+    payload = { body: event.data ? event.data.text() : '' };
+  }
+
+  const data = payload.data || payload;
+  const title = data.title || 'Chatly';
+  const isCall = data.type === 'call';
+
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body: data.body || 'New message',
+      icon: data.icon || '/icons/icon-192.png',
+      badge: '/icons/icon-192.png',
+      tag: data.tag || (isCall ? 'chatly-call' : 'chatly-message'),
+      renotify: true,
+      requireInteraction: isCall,
+      vibrate: isCall ? [500, 300, 500, 300, 500] : [200, 100, 200],
+      data: {
+        url: data.url || '/',
+        conversationId: data.conversationId || '',
+        callId: data.callId || '',
+      },
+    })
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const targetUrl = event.notification.data?.url || '/';
+
+  event.waitUntil(
+    (async () => {
+      const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      for (const client of windows) {
+        if ('focus' in client) {
+          if ('navigate' in client) {
+            try {
+              await client.navigate(targetUrl);
+            } catch {
+              // Focus the existing window even if navigation is blocked.
+            }
+          }
+          return client.focus();
+        }
+      }
+      return self.clients.openWindow(targetUrl);
+    })()
   );
 });

@@ -133,7 +133,7 @@ export function NewChatModal({ onClose, onSelectConversation }: NewChatModalProp
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="Search exact @username or email"
-              className="h-10 w-full rounded-lg bg-[var(--wa-panel-2)] pl-10 pr-3 text-[14px] text-[var(--wa-text)] outline-none placeholder:text-[var(--wa-text-3)]"
+              className="h-10 w-full rounded-lg bg-[var(--wa-panel-2)] pl-10 pr-3 text-[15px] text-[var(--wa-text)] outline-none placeholder:text-[var(--wa-text-3)]"
             />
           </div>
         </div>
@@ -170,13 +170,13 @@ export function NewChatModal({ onClose, onSelectConversation }: NewChatModalProp
                 <button
                   onClick={() => handleStartChat(target)}
                   disabled={!!startingId}
-                  className="flex min-w-0 flex-1 items-center gap-3 px-4 py-2.5 text-left disabled:opacity-60"
+                  className="flex min-w-0 flex-1 items-center gap-3 px-4 py-3 text-left disabled:opacity-60"
                 >
                   <div className="relative shrink-0">
                     <img
                       src={target.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${target.uid}`}
                       alt=""
-                      className="h-12 w-12 rounded-full object-cover"
+                      className="h-[49px] w-[49px] rounded-full object-cover"
                       onError={(e) => onAvatarError(e, target.uid)}
                     />
                     {target.isOnline && (
@@ -184,10 +184,10 @@ export function NewChatModal({ onClose, onSelectConversation }: NewChatModalProp
                     )}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-[15px] font-medium text-[var(--wa-text)]">
+                    <div className="truncate text-[17px] leading-[22px] text-[var(--wa-text)]">
                       {target.displayName}
                     </div>
-                    <div className="truncate text-[12.5px] text-[var(--wa-text-2)]">
+                    <div className="truncate text-[14px] leading-5 text-[var(--wa-text-2)]">
                       {target.username ? `@${target.username}` : target.email}
                     </div>
                   </div>

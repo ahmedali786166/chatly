@@ -3,6 +3,7 @@ import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { useAuth } from '../context/AuthContext';
 import { useNotification } from '../context/NotificationContext';
+import { registerPushToken } from '../services/push';
 import { uploadFile } from '../services/storage';
 import { ImageCropModal } from './ImageCropModal';
 import { UserProfile } from '../types';
@@ -186,7 +187,10 @@ export function SettingsModal({ onClose, currentTheme, setTheme }: SettingsModal
     setNotificationsEnabled(nextVal);
     if (nextVal) {
       const granted = await requestPermission();
-      if (!granted) {
+      if (granted) {
+        const uid = profile?.uid;
+        if (uid) registerPushToken(uid).catch(() => {});
+      } else {
         addToast({
           type: 'warning',
           title: 'Permission needed',

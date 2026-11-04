@@ -46,6 +46,7 @@ export interface Conversation {
     timestamp: string;
     mediaType?: string;
     readBy?: string[];
+    deliveredTo?: string[];
   };
   unreadCounts?: Record<string, number>;
   groupInfo?: {

@@ -16,6 +16,7 @@ import { useDirectory } from '../context/DirectoryContext';
 import { useNotification } from '../context/NotificationContext';
 import { usePwaInstall } from '../hooks/usePwaInstall';
 import { sounds } from '../services/sound';
+import { pushConfigured } from '../services/push';
 import { formatTime12 } from '../lib/time';
 import { onAvatarError } from '../lib/avatar';
 import { Conversation } from '../types';
@@ -128,7 +129,7 @@ export function LeftSidebar({
               avatar,
               onClick: () => onSelectConversation(conv.id),
             });
-            if (profile?.notificationsEnabled !== false) {
+            if (profile?.notificationsEnabled !== false && !pushConfigured) {
               sendPushNotification(title, body, avatar);
             }
             if (!notified) {
@@ -306,7 +307,7 @@ export function LeftSidebar({
             <h1 className="truncate text-[17px] font-semibold leading-tight text-[var(--wa-text)]">
               Chatly
             </h1>
-            <p className="truncate text-[11px] text-[var(--wa-text-2)]">
+            <p className="truncate text-[12px] text-[var(--wa-text-2)]">
               {profile?.isOnline ? 'online' : 'offline'}
             </p>
           </div>
@@ -318,14 +319,14 @@ export function LeftSidebar({
             className="flex h-10 w-10 items-center justify-center rounded-full text-[#54656f] transition hover:bg-black/5 dark:text-[#aebac1] dark:hover:bg-white/5"
             title="New chat"
           >
-            <Plus className="h-5 w-5" />
+            <Plus className="h-6 w-6" />
           </button>
           <button
             onClick={onOpenStatus}
             className="flex h-10 w-10 items-center justify-center rounded-full text-[#54656f] transition hover:bg-black/5 dark:text-[#aebac1] dark:hover:bg-white/5 md:hidden"
             title="Status"
           >
-            <CircleDashed className="h-5 w-5" />
+            <CircleDashed className="h-6 w-6" />
           </button>
           <div className="relative">
             <button
@@ -336,7 +337,7 @@ export function LeftSidebar({
               className="flex h-10 w-10 items-center justify-center rounded-full text-[#54656f] transition hover:bg-black/5 dark:text-[#aebac1] dark:hover:bg-white/5"
               title="Menu"
             >
-              <MoreVertical className="h-5 w-5" />
+              <MoreVertical className="h-6 w-6" />
             </button>
 
             {showHeaderMenu && (
@@ -351,9 +352,9 @@ export function LeftSidebar({
                       setShowHeaderMenu(false);
                       item.action();
                     }}
-                    className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-[13.5px] text-[var(--wa-text)] transition hover:bg-[var(--wa-hover)]"
+                    className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-[14px] text-[var(--wa-text)] transition hover:bg-[var(--wa-hover)]"
                   >
-                    <item.icon className="h-4 w-4 text-[var(--wa-text-2)]" />
+                    <item.icon className="h-[18px] w-[18px] text-[var(--wa-text-2)]" />
                     {item.label}
                   </button>
                 ))}
@@ -366,13 +367,13 @@ export function LeftSidebar({
       {/* Search */}
       <div className="shrink-0 bg-[var(--wa-panel)] px-3 py-2">
         <div className="relative">
-          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--wa-text-2)]" />
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-[var(--wa-text-2)]" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search or start new chat"
-            className="h-9 w-full rounded-lg bg-[var(--wa-panel-2)] pl-10 pr-3 text-[14px] text-[var(--wa-text)] outline-none placeholder:text-[var(--wa-text-3)] focus:ring-1 focus:ring-[#00a884]/40"
+            className="h-9 w-full rounded-lg bg-[var(--wa-panel-2)] pl-10 pr-3 text-[15px] text-[var(--wa-text)] outline-none placeholder:text-[var(--wa-text-3)] focus:ring-1 focus:ring-[#00a884]/40"
           />
         </div>
       </div>
@@ -438,6 +439,7 @@ export function LeftSidebar({
             const isMuted = conv.mutedBy?.includes(user?.uid || '');
             const isArchived = conv.archivedBy?.includes(user?.uid || '');
             const lastRead = last?.readBy && last.readBy.length > 1;
+            const lastDelivered = last?.deliveredTo && last.deliveredTo.length > 1;
 
             return (
               <div
@@ -447,7 +449,7 @@ export function LeftSidebar({
                   e.preventDefault();
                   setMenuFor(conv.id);
                 }}
-                className={`group relative flex cursor-pointer items-center gap-3 px-3 py-2.5 transition ${
+                className={`group relative flex cursor-pointer items-center gap-3 px-4 py-3 transition ${
                   isSelected
                     ? 'bg-[var(--wa-active)]'
                     : 'hover:bg-[var(--wa-hover)]'
@@ -467,11 +469,11 @@ export function LeftSidebar({
 
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline justify-between gap-2">
-                    <h3 className="truncate text-[15px] font-medium text-[var(--wa-text)]">
+                    <h3 className="truncate text-[17px] font-normal leading-[22px] text-[var(--wa-text)]">
                       {name}
                     </h3>
                     <span
-                      className={`shrink-0 text-[11px] ${
+                      className={`shrink-0 text-[12px] ${
                         unread > 0 ? 'font-medium text-[#00a884]' : 'text-[var(--wa-text-2)]'
                       }`}
                     >
@@ -479,15 +481,15 @@ export function LeftSidebar({
                     </span>
                   </div>
 
-                  <div className="mt-0.5 flex items-center justify-between gap-2">
-                    <div className="flex min-w-0 items-center gap-1 text-[13px] text-[var(--wa-text-2)]">
-                      {mine && last && (
-                        <CheckCheck
-                          className={`h-[15px] w-[15px] shrink-0 ${
-                            lastRead ? 'text-[#53bdeb]' : 'text-[var(--wa-text-3)]'
-                          }`}
-                        />
-                      )}
+                    <div className="mt-1 flex items-center justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-1 text-[14px] leading-5 text-[var(--wa-text-2)]">
+                      {mine && last && lastRead ? (
+                        <CheckCheck className="h-4 w-4 shrink-0 text-[#53bdeb]" />
+                      ) : mine && last && lastDelivered ? (
+                        <CheckCheck className="h-4 w-4 shrink-0 text-[var(--wa-text-3)]" />
+                      ) : mine && last ? (
+                        <Check className="h-4 w-4 shrink-0 text-[var(--wa-text-3)]" />
+                      ) : null}
                       {isGroup && last && !mine && (
                         <span className="shrink-0 text-[var(--wa-text-2)]">
                           {last.senderId
@@ -501,10 +503,10 @@ export function LeftSidebar({
                     </div>
 
                     <div className="flex shrink-0 items-center gap-1.5">
-                      {isMuted && <BellOff className="h-3.5 w-3.5 text-[var(--wa-text-3)]" />}
-                      {isPinned && <Pin className="h-3.5 w-3.5 text-[var(--wa-text-3)]" />}
+                      {isMuted && <BellOff className="h-4 w-4 text-[var(--wa-text-3)]" />}
+                      {isPinned && <Pin className="h-4 w-4 text-[var(--wa-text-3)]" />}
                       {unread > 0 && (
-                        <span className="flex h-[19px] min-w-[19px] items-center justify-center rounded-full bg-[#25d366] px-1.5 text-[11px] font-semibold text-white">
+                        <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[#25d366] px-1.5 text-[12px] font-semibold leading-none text-white">
                           {unread > 99 ? '99+' : unread}
                         </span>
                       )}
@@ -516,7 +518,7 @@ export function LeftSidebar({
                         className="flex h-7 w-7 items-center justify-center rounded-full text-[var(--wa-text-2)] opacity-0 transition hover:bg-black/10 group-hover:opacity-100 dark:hover:bg-white/10"
                         title="Chat options"
                       >
-                        <MoreVertical className="h-4 w-4" />
+                        <MoreVertical className="h-[18px] w-[18px]" />
                       </button>
                     </div>
                   </div>
@@ -532,9 +534,9 @@ export function LeftSidebar({
                         updateChatListField(conv.id, 'pinnedBy', !isPinned);
                         setMenuFor(null);
                       }}
-                      className="flex w-full items-center gap-3 px-4 py-2 text-left text-[13px] text-[var(--wa-text)] hover:bg-[var(--wa-hover)]"
+                      className="flex w-full items-center gap-3 px-4 py-2 text-left text-[14px] text-[var(--wa-text)] hover:bg-[var(--wa-hover)]"
                     >
-                      <Pin className="h-4 w-4 text-[var(--wa-text-2)]" />
+                      <Pin className="h-[18px] w-[18px] text-[var(--wa-text-2)]" />
                       {isPinned ? 'Unpin chat' : 'Pin chat'}
                     </button>
                     <button
@@ -542,9 +544,9 @@ export function LeftSidebar({
                         updateChatListField(conv.id, 'mutedBy', !isMuted);
                         setMenuFor(null);
                       }}
-                      className="flex w-full items-center gap-3 px-4 py-2 text-left text-[13px] text-[var(--wa-text)] hover:bg-[var(--wa-hover)]"
+                      className="flex w-full items-center gap-3 px-4 py-2 text-left text-[14px] text-[var(--wa-text)] hover:bg-[var(--wa-hover)]"
                     >
-                      <BellOff className="h-4 w-4 text-[var(--wa-text-2)]" />
+                      <BellOff className="h-[18px] w-[18px] text-[var(--wa-text-2)]" />
                       {isMuted ? 'Unmute notifications' : 'Mute notifications'}
                     </button>
                     <button
@@ -552,12 +554,12 @@ export function LeftSidebar({
                         updateChatListField(conv.id, 'archivedBy', !isArchived);
                         setMenuFor(null);
                       }}
-                      className="flex w-full items-center gap-3 px-4 py-2 text-left text-[13px] text-[var(--wa-text)] hover:bg-[var(--wa-hover)]"
+                      className="flex w-full items-center gap-3 px-4 py-2 text-left text-[14px] text-[var(--wa-text)] hover:bg-[var(--wa-hover)]"
                     >
                       {isArchived ? (
-                        <ArchiveRestore className="h-4 w-4 text-[var(--wa-text-2)]" />
+                        <ArchiveRestore className="h-[18px] w-[18px] text-[var(--wa-text-2)]" />
                       ) : (
-                        <Archive className="h-4 w-4 text-[var(--wa-text-2)]" />
+                        <Archive className="h-[18px] w-[18px] text-[var(--wa-text-2)]" />
                       )}
                       {isArchived ? 'Unarchive chat' : 'Archive chat'}
                     </button>
@@ -566,9 +568,9 @@ export function LeftSidebar({
                         onSelectConversation(conv.id);
                         setMenuFor(null);
                       }}
-                      className="flex w-full items-center gap-3 px-4 py-2 text-left text-[13px] text-[var(--wa-text)] hover:bg-[var(--wa-hover)]"
+                      className="flex w-full items-center gap-3 px-4 py-2 text-left text-[14px] text-[var(--wa-text)] hover:bg-[var(--wa-hover)]"
                     >
-                      <Check className="h-4 w-4 text-[var(--wa-text-2)]" />
+                      <Check className="h-[18px] w-[18px] text-[var(--wa-text-2)]" />
                       Open chat
                     </button>
                   </div>

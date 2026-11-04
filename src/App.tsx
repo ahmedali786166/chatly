@@ -19,6 +19,7 @@ import { ChannelsModal } from './components/ChannelsModal';
 import { SettingsModal } from './components/SettingsModal';
 import { CallModal } from './components/CallModal';
 import { InstallPrompt } from './components/InstallPrompt';
+import { NotificationPrompt } from './components/NotificationPrompt';
 import { Conversation, Message, UserProfile } from './types';
 import { doc, getDoc, onSnapshot, collection, query, orderBy, limit } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from './firebase/config';
@@ -149,6 +150,21 @@ function MainApp() {
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [showChannelsModal, setShowChannelsModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+
+  // Notification taps land on /?chat=<id> — open that conversation once.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const chatId = params.get('chat');
+    if (!chatId) return;
+    setActiveConversationId(chatId);
+    params.delete('chat');
+    const query = params.toString();
+    window.history.replaceState(
+      {},
+      '',
+      `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`
+    );
+  }, []);
 
   // Apply the saved theme globally
   useEffect(() => {
@@ -445,6 +461,7 @@ export default function App() {
           <CallProvider>
             <MainApp />
             <InstallPrompt />
+            <NotificationPrompt />
           </CallProvider>
         </NotificationProvider>
       </DirectoryProvider>

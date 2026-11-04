@@ -15,6 +15,7 @@ import { db, handleFirestoreError, OperationType } from '../firebase/config';
 import { useAuth } from './AuthContext';
 import { CallSession, CallType } from '../types';
 import { sounds } from '../services/sound';
+import { notifyRecipients } from '../services/push';
 
 interface CallContextType {
   activeCall: CallSession | null;
@@ -210,6 +211,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       await setDoc(callDocRef, callData);
       setActiveCall(callData);
       sounds.startDialTone();
+
+      // Alert the receiver's device even when their app is closed.
+      user
+        .getIdToken()
+        .then((idToken) => notifyRecipients({ callId: callData.id }, idToken))
+        .catch(() => {});
 
       // Collect ICE candidates
       const callerCandidatesCol = collection(callDocRef, 'callerCandidates');
