@@ -150,6 +150,7 @@ export function SettingsModal({ onClose, currentTheme, setTheme }: SettingsModal
         sent?: number;
         tokens?: number;
         error?: string;
+        errors?: string[];
       };
       if (!response.ok) throw new Error(data.error || 'Server error');
       await refreshPushStatus();
@@ -159,11 +160,17 @@ export function SettingsModal({ onClose, currentTheme, setTheme }: SettingsModal
           title: 'Test sent',
           message: `Delivered to ${data.sent} device${data.sent === 1 ? '' : 's'}.`,
         });
-      } else {
+      } else if ((data.tokens || 0) === 0) {
         addToast({
           type: 'warning',
           title: 'No device registered',
           message: 'Enable notifications on this device first, then send a test again.',
+        });
+      } else {
+        addToast({
+          type: 'error',
+          title: 'Test not delivered',
+          message: `FCM rejected the device token (${(data.errors || []).slice(0, 2).join(', ') || 'unknown'}). Disable and re-enable notifications to refresh the token.`,
         });
       }
     } catch (err) {

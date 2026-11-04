@@ -119,10 +119,18 @@ async function cleanupTokens(db: Firestore, uid: string, tokensToDrop: string[])
 async function sendToTargets(
   db: Firestore,
   targets: DeliveryTarget[],
-  payload: { title: string; body: string; icon?: string; type: 'message' | 'call'; url: string; tag: string }
+  payload: {
+    title: string;
+    body: string;
+    icon?: string;
+    type: 'message' | 'call';
+    url: string;
+    tag: string;
+  }
 ) {
   const messaging = getMessaging(adminApp());
   let sent = 0;
+  const errors: string[] = [];
 
   await Promise.all(
     targets.map(async (target) => {
@@ -140,28 +148,32 @@ async function sendToTargets(
         webpush: {
           headers: {
             Urgency: payload.type === 'call' ? 'high' : 'normal',
-            TTL: '86400',
+            // A call that was not delivered promptly must not ring hours later.
+            TTL: payload.type === 'call' ? '60' : '86400',
           },
           fcmOptions: { link: payload.url },
         },
       });
 
       sent += response.successCount;
-      const stale = response.responses
-        .map((result, index) =>
-          !result.success &&
-          (result.error?.code === 'messaging/registration-token-not-registered' ||
-            result.error?.code === 'messaging/invalid-registration-token')
-            ? target.tokens[index]
-            : null
-        )
-        .filter((token): token is string => Boolean(token));
+      const stale: string[] = [];
+      response.responses.forEach((result, index) => {
+        if (result.success) return;
+        const code = result.error?.code || 'unknown-error';
+        errors.push(code);
+        if (
+          code === 'messaging/registration-token-not-registered' ||
+          code === 'messaging/invalid-registration-token'
+        ) {
+          stale.push(target.tokens[index]);
+        }
+      });
 
       await cleanupTokens(db, target.uid, stale);
     })
   );
 
-  return sent;
+  return { sent, errors };
 }
 
 export default async function handler(req: ApiRequest, res: ApiResponse) {
@@ -199,7 +211,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
         res.status(200).json({ sent: 0, tokens: 0 });
         return;
       }
-      const sent = await sendToTargets(
+      const result = await sendToTargets(
         db,
         [{ uid: callerId, tokens }],
         {
@@ -210,7 +222,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
           tag: 'chatly-test',
         }
       );
-      res.status(200).json({ sent, tokens: tokens.length });
+      res.status(200).json({ sent: result.sent, tokens: tokens.length, errors: result.errors });
       return;
     }
 
@@ -250,7 +262,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
         return;
       }
 
-      const sent = await sendToTargets(
+      const result = await sendToTargets(
         db,
         [{ uid: call.receiverId, tokens }],
         {
@@ -262,7 +274,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
           tag: `call-${body.callId}`,
         }
       );
-      res.status(200).json({ sent });
+      res.status(200).json({ sent: result.sent, errors: result.errors });
       return;
     }
 
@@ -335,7 +347,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       return;
     }
 
-    const sent = await sendToTargets(db, targets, {
+    const result = await sendToTargets(db, targets, {
       title: isGroup ? conversation.groupInfo?.name || 'Group' : senderName,
       body: isGroup ? `${senderName}: ${last.text || 'New message'}` : last.text || 'New message',
       icon: isGroup ? conversation.groupInfo?.photoURL : senderPhoto,
@@ -344,7 +356,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       tag: `chat-${body.conversationId}`,
     });
 
-    res.status(200).json({ sent });
+    res.status(200).json({ sent: result.sent, errors: result.errors });
   } catch (error) {
     console.error('Push send failed:', error);
     res.status(500).json({ error: 'push failed' });

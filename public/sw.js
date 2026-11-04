@@ -88,7 +88,9 @@ self.addEventListener('push', (event) => {
       tag: data.tag || (isCall ? 'chatly-call' : 'chatly-message'),
       renotify: true,
       requireInteraction: isCall,
-      vibrate: isCall ? [500, 300, 500, 300, 500] : [200, 100, 200],
+      vibrate: isCall
+        ? [1000, 500, 1000, 500, 1000, 500, 1000]
+        : [200, 100, 200],
       data: {
         url: data.url || '/',
         conversationId: data.conversationId || '',
@@ -101,13 +103,16 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const targetUrl = event.notification.data?.url || '/';
+  // For calls, just focus the app: the ringing overlay is already driven by
+  // the live call document, and navigating away would lose the open chat.
+  const isCall = Boolean(event.notification.data?.callId);
 
   event.waitUntil(
     (async () => {
       const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
       for (const client of windows) {
         if ('focus' in client) {
-          if ('navigate' in client) {
+          if (!isCall && 'navigate' in client) {
             try {
               await client.navigate(targetUrl);
             } catch {
