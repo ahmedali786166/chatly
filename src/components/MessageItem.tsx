@@ -144,7 +144,7 @@ export function MessageItem({
         setShowReactions(false);
       }}
     >
-      <div className={`flex max-w-full items-end gap-1.5 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
+      <div className={`flex w-full max-w-full items-end gap-1.5 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
         {!isMe && isGroup && (
           <img
             src={photoFor(message.senderId, message.senderPhoto)}
@@ -154,7 +154,7 @@ export function MessageItem({
           />
         )}
 
-        <div className={`relative flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
+        <div className={`wa-message-col relative flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
           {/* Hover reaction toolbar */}
           {showReactions && (
             <div

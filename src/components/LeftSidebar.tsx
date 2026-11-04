@@ -60,7 +60,7 @@ export function LeftSidebar({
 }: LeftSidebarProps) {
   const { user, profile } = useAuth();
   const { addToast, sendPushNotification } = useNotification();
-  const { canInstall, promptInstall } = usePwaInstall();
+  const { isInstalled, promptInstall } = usePwaInstall();
   const { displayNameFor, photoFor, nicknameFor, directory } = useDirectory();
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -253,7 +253,7 @@ export function LeftSidebar({
     { label: 'Settings', icon: Settings, action: onOpenSettings },
   ];
 
-  if (canInstall) {
+  if (!isInstalled) {
     menuItems.push({
       label: 'Install app',
       icon: Download,
@@ -264,6 +264,13 @@ export function LeftSidebar({
             title: 'Installing Chatly',
             message: 'Chatly will open like an app from your home screen.',
             type: 'success',
+          });
+        } else if (outcome === 'unavailable') {
+          addToast({
+            title: 'Install Chatly',
+            message:
+              'Open your browser menu and choose "Install app" or "Add to Home screen".',
+            type: 'info',
           });
         }
       },

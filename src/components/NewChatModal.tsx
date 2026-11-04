@@ -1,9 +1,11 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useDirectory } from '../context/DirectoryContext';
 import { useNotification } from '../context/NotificationContext';
 import { UserProfile } from '../types';
 import { ensureDirectConversation } from '../services/chat';
+import { db } from '../firebase/config';
+import { collection, getDocs, query, where } from 'firebase/firestore';
 import { Search, X, MessageCircle, Loader2, UserPlus, UserCheck } from 'lucide-react';
 import { onAvatarError } from '../lib/avatar';
 
@@ -15,34 +17,71 @@ interface NewChatModalProps {
 export function NewChatModal({ onClose, onSelectConversation }: NewChatModalProps) {
   const { user, profile } = useAuth();
   const { addToast } = useNotification();
-  const { directory, isSavedContact, saveContactFor } = useDirectory();
+  const { isSavedContact, saveContactFor } = useDirectory();
   const [searchTerm, setSearchTerm] = useState('');
+  const [results, setResults] = useState<UserProfile[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [searched, setSearched] = useState(false);
   const [startingId, setStartingId] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
 
-  const users = useMemo(() => {
-    const list: UserProfile[] = [];
-    Object.values(directory).forEach((data) => {
-      if (!data?.uid || data.uid === user?.uid) return;
-      if (profile?.blockedUsers?.includes(data.uid)) return;
-      list.push(data);
-    });
-    return list.sort((a, b) => (a.displayName || '').localeCompare(b.displayName || ''));
-  }, [directory, user?.uid, profile?.blockedUsers]);
+  // Privacy: never list the directory. Only exact username/email lookups run,
+  // and only after the user has typed something.
+  useEffect(() => {
+    const raw = searchTerm.trim().replace(/^@/, '');
+    if (!raw) {
+      setResults([]);
+      setSearched(false);
+      setSearching(false);
+      return;
+    }
 
-  const filteredUsers = useMemo(() => {
-    const q = searchTerm.toLowerCase().trim();
-    if (!q) return users;
-    const handle = q.replace(/^@/, '');
-    // Names and emails may match partially; usernames must match exactly so a
-    // short query never exposes unrelated accounts.
-    return users.filter(
-      (u) =>
-        (u.displayName || '').toLowerCase().includes(q) ||
-        (u.username || '').toLowerCase() === handle ||
-        (u.email || '').toLowerCase() === q
-    );
-  }, [users, searchTerm]);
+    let cancelled = false;
+    setSearching(true);
+    setSearched(false);
+
+    const timer = window.setTimeout(async () => {
+      try {
+        const handle = raw.toLowerCase();
+        const lookups = [
+          getDocs(query(collection(db, 'users'), where('username', '==', handle))),
+        ];
+        if (handle.includes('@') && handle.includes('.')) {
+          lookups.push(
+            getDocs(query(collection(db, 'users'), where('email', '==', handle)))
+          );
+        }
+
+        const snapshots = await Promise.all(lookups);
+        const found = new Map<string, UserProfile>();
+        snapshots.forEach((snapshot) => {
+          snapshot.forEach((docSnap) => {
+            found.set(docSnap.id, { uid: docSnap.id, ...docSnap.data() } as UserProfile);
+          });
+        });
+
+        const list = Array.from(found.values()).filter(
+          (candidate) =>
+            candidate.uid !== user?.uid &&
+            !profile?.blockedUsers?.includes(candidate.uid)
+        );
+
+        if (!cancelled) setResults(list);
+      } catch {
+        if (!cancelled) setResults([]);
+      } finally {
+        if (!cancelled) {
+          setSearching(false);
+          setSearched(true);
+        }
+      }
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [searchTerm, user?.uid, profile?.blockedUsers]);
 
   const handleStartChat = async (target: UserProfile) => {
     if (!user || !profile || startingId) return;
@@ -93,25 +132,37 @@ export function NewChatModal({ onClose, onSelectConversation }: NewChatModalProp
               autoFocus
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search name, exact @username or email"
+              placeholder="Search exact @username or email"
               className="h-10 w-full rounded-lg bg-[var(--wa-panel-2)] pl-10 pr-3 text-[14px] text-[var(--wa-text)] outline-none placeholder:text-[var(--wa-text-3)]"
             />
           </div>
         </div>
 
         <div className="flex-1 overflow-y-auto py-1">
-          {filteredUsers.length === 0 ? (
+          {!searchTerm.trim() ? (
+            <div className="flex flex-col items-center justify-center gap-2 px-8 py-16 text-center">
+              <Search className="h-8 w-8 text-[var(--wa-text-3)]" />
+              <p className="text-sm font-medium text-[var(--wa-text)]">Search for someone</p>
+              <p className="text-xs leading-relaxed text-[var(--wa-text-2)]">
+                Enter their exact @username or email address. For privacy, all registered
+                users are not listed.
+              </p>
+            </div>
+          ) : searching ? (
+            <div className="flex flex-col items-center justify-center gap-2 px-8 py-16 text-center">
+              <Loader2 className="h-7 w-7 animate-spin text-[#00a884]" />
+              <p className="text-xs text-[var(--wa-text-2)]">Searching…</p>
+            </div>
+          ) : searched && results.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-2 px-8 py-16 text-center">
               <MessageCircle className="h-8 w-8 text-[var(--wa-text-3)]" />
-              <p className="text-sm font-medium text-[var(--wa-text)]">No contacts found</p>
+              <p className="text-sm font-medium text-[var(--wa-text)]">No user found</p>
               <p className="text-xs leading-relaxed text-[var(--wa-text-2)]">
-                {searchTerm
-                  ? 'Usernames need an exact match. Try their full @username or name.'
-                  : 'Invite someone to join Chatly and start chatting.'}
+                Check the exact @username or email address and try again.
               </p>
             </div>
           ) : (
-            filteredUsers.map((target) => (
+            results.map((target) => (
               <div
                 key={target.uid}
                 className="flex w-full items-center gap-1 pr-2 transition hover:bg-[var(--wa-hover)]"

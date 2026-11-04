@@ -116,13 +116,24 @@ html.dark {
   background-image: linear-gradient(135deg, rgba(0, 168, 132, 0.10), rgba(255, 255, 255, 0) 45%, rgba(0, 128, 105, 0.10));
 }
 
-/* Chat bubbles with WhatsApp tails */
+/* Message column caps the bubble width; the row itself is full width so the
+   percentage resolves against the chat pane instead of the text itself. */
+.wa-message-col {
+  width: fit-content;
+  max-width: min(75%, 560px);
+}
+
+/* Chat bubbles with WhatsApp tails. */
 .wa-bubble {
   position: relative;
   border-radius: 8px;
   box-shadow: var(--wa-bubble-shadow);
-  max-width: min(65%, 560px);
+  max-width: 100%;
+  width: fit-content;
+  min-width: 60px;
   word-break: break-word;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .wa-bubble-out {
@@ -171,7 +182,7 @@ html.dark {
 /* Mobile: bubbles get the full width of the chat column instead of being
    squeezed by the desktop max-width, and media never overflows the viewport. */
 @media (max-width: 640px) {
-  .wa-bubble {
+  .wa-message-col {
     max-width: 88%;
   }
 
