@@ -200,9 +200,21 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
         callerPhoto?: string;
         receiverId?: string;
         callType?: string;
+        status?: string;
+        createdAt?: string;
       };
       if (call.callerId !== callerId || !call.receiverId) {
         res.status(403).json({ error: 'forbidden' });
+        return;
+      }
+
+      const callAge = Date.now() - new Date(call.createdAt || 0).getTime();
+      if (
+        (call.status !== 'calling' && call.status !== 'ringing') ||
+        !Number.isFinite(callAge) ||
+        callAge > 2 * 60 * 1000
+      ) {
+        res.status(200).json({ sent: 0 });
         return;
       }
 
@@ -261,6 +273,16 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
     const last = conversation.lastMessage;
     if (!last?.timestamp) {
+      res.status(200).json({ sent: 0 });
+      return;
+    }
+    if (last.senderId !== callerId) {
+      res.status(403).json({ error: 'forbidden' });
+      return;
+    }
+
+    const messageAge = Date.now() - new Date(last.timestamp).getTime();
+    if (!Number.isFinite(messageAge) || messageAge > 2 * 60 * 1000) {
       res.status(200).json({ sent: 0 });
       return;
     }
