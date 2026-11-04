@@ -55,6 +55,14 @@ export function NotificationPrompt() {
           title: 'Notifications on',
           message: 'You will get message and call alerts even when Chatly is closed.',
         });
+      } else if (Notification.permission === 'granted') {
+        dismiss();
+        addToast({
+          type: 'error',
+          title: 'Could not register this device',
+          message:
+            'Push registration failed. Check that VITE_FIREBASE_VAPID_KEY has the Web Push certificate key.',
+        });
       } else {
         dismiss();
         addToast({

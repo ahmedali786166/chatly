@@ -67,8 +67,8 @@ export async function enablePushNotifications(uid: string): Promise<boolean> {
   const permission = await Notification.requestPermission();
   if (permission !== 'granted') return false;
 
-  await registerPushToken(uid);
-  return true;
+  const token = await registerPushToken(uid);
+  return Boolean(token);
 }
 
 /**
