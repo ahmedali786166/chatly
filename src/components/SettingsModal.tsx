@@ -560,7 +560,7 @@ export function SettingsModal({ onClose, currentTheme, setTheme }: SettingsModal
                 )}
                 {toggleRow(
                   'Desktop notifications',
-                  'Show browser alerts when Chatly is running in the background.',
+                  'Show alerts for messages and calls even when Chatly is closed.',
                   notificationsEnabled,
                   handleToggleNotifications
                 )}
