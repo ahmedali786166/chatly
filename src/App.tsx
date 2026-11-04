@@ -18,6 +18,7 @@ import { StatusModal } from './components/StatusModal';
 import { ChannelsModal } from './components/ChannelsModal';
 import { SettingsModal } from './components/SettingsModal';
 import { CallModal } from './components/CallModal';
+import { CallsModal } from './components/CallsModal';
 import { InstallPrompt } from './components/InstallPrompt';
 import { NotificationPrompt } from './components/NotificationPrompt';
 import { Conversation, Message, UserProfile } from './types';
@@ -41,6 +42,7 @@ import {
 function NavRail({
   active,
   onChats,
+  onCalls,
   onStatus,
   onChannels,
   onSettings,
@@ -50,6 +52,7 @@ function NavRail({
 }: {
   active: string;
   onChats: () => void;
+  onCalls: () => void;
   onStatus: () => void;
   onChannels: () => void;
   onSettings: () => void;
@@ -74,6 +77,10 @@ function NavRail({
         >
           <MessageCircle className="w-6 h-6" />
           <span className="absolute -bottom-0.5 h-1 w-6 rounded-full bg-[#00a884]" style={{ opacity: active === 'chats' ? 1 : 0 }} />
+        </button>
+
+        <button onClick={onCalls} className={itemClass('calls')} title="Calls">
+          <Phone className="w-6 h-6" />
         </button>
 
         <button onClick={onStatus} className={itemClass('status')} title="Status">
@@ -150,14 +157,22 @@ function MainApp() {
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [showChannelsModal, setShowChannelsModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showCallsModal, setShowCallsModal] = useState(false);
+  const [newChatSearch, setNewChatSearch] = useState('');
 
-  // Notification taps land on /?chat=<id> — open that conversation once.
+  // Notification taps land on /?chat=<id>, invite links on /?invite=<username>.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const chatId = params.get('chat');
-    if (!chatId) return;
-    setActiveConversationId(chatId);
+    const invite = params.get('invite');
+    if (!chatId && !invite) return;
+    if (chatId) setActiveConversationId(chatId);
+    if (invite) {
+      setNewChatSearch(invite.replace(/^@/, ''));
+      setShowNewChatModal(true);
+    }
     params.delete('chat');
+    params.delete('invite');
     const query = params.toString();
     window.history.replaceState(
       {},
@@ -279,7 +294,9 @@ function MainApp() {
     return <AuthModal />;
   }
 
-  const railActive = showStatusModal
+  const railActive = showCallsModal
+    ? 'calls'
+    : showStatusModal
     ? 'status'
     : showChannelsModal
     ? 'channels'
@@ -292,13 +309,24 @@ function MainApp() {
       <NavRail
         active={railActive}
         onChats={() => {
+          setShowCallsModal(false);
           setShowStatusModal(false);
           setShowChannelsModal(false);
           setShowSettingsModal(false);
         }}
-        onStatus={() => setShowStatusModal(true)}
-        onChannels={() => setShowChannelsModal(true)}
-        onSettings={() => setShowSettingsModal(true)}
+        onCalls={() => setShowCallsModal(true)}
+        onStatus={() => {
+          setShowCallsModal(false);
+          setShowStatusModal(true);
+        }}
+        onChannels={() => {
+          setShowCallsModal(false);
+          setShowChannelsModal(true);
+        }}
+        onSettings={() => {
+          setShowCallsModal(false);
+          setShowSettingsModal(true);
+        }}
         onToggleTheme={handleToggleTheme}
         dark={dark}
         profile={profile}
@@ -313,8 +341,12 @@ function MainApp() {
         <LeftSidebar
           activeConversationId={activeConversationId}
           onSelectConversation={(id) => setActiveConversationId(id)}
-          onOpenNewChat={() => setShowNewChatModal(true)}
+          onOpenNewChat={() => {
+            setNewChatSearch('');
+            setShowNewChatModal(true);
+          }}
           onOpenNewGroup={() => setShowNewGroupModal(true)}
+          onOpenCalls={() => setShowCallsModal(true)}
           onOpenStatus={() => setShowStatusModal(true)}
           onOpenChannels={() => setShowChannelsModal(true)}
           onOpenSettings={() => setShowSettingsModal(true)}
@@ -408,10 +440,15 @@ function MainApp() {
 
       {showNewChatModal && (
         <NewChatModal
-          onClose={() => setShowNewChatModal(false)}
+          initialSearch={newChatSearch}
+          onClose={() => {
+            setShowNewChatModal(false);
+            setNewChatSearch('');
+          }}
           onSelectConversation={(id) => {
             setActiveConversationId(id);
             setShowNewChatModal(false);
+            setNewChatSearch('');
           }}
         />
       )}
@@ -434,6 +471,8 @@ function MainApp() {
       )}
 
       {showChannelsModal && <ChannelsModal onClose={() => setShowChannelsModal(false)} />}
+
+      {showCallsModal && <CallsModal onClose={() => setShowCallsModal(false)} />}
 
       {showSettingsModal && (
         <SettingsModal

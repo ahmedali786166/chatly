@@ -185,8 +185,34 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       return;
     }
 
-    const body = (req.body || {}) as { conversationId?: string; callId?: string };
+    const body = (req.body || {}) as {
+      conversationId?: string;
+      callId?: string;
+      test?: boolean;
+    };
     const db = database();
+
+    // Settings → Notifications → "Send test" pushes to the caller's own devices.
+    if (body.test) {
+      const tokens = await tokensFor(db, callerId);
+      if (!tokens) {
+        res.status(200).json({ sent: 0, tokens: 0 });
+        return;
+      }
+      const sent = await sendToTargets(
+        db,
+        [{ uid: callerId, tokens }],
+        {
+          title: 'Chatly notifications are working',
+          body: 'You will get alerts for messages and calls even when Chatly is closed.',
+          type: 'message',
+          url: '/',
+          tag: 'chatly-test',
+        }
+      );
+      res.status(200).json({ sent, tokens: tokens.length });
+      return;
+    }
 
     if (body.callId) {
       const callSnap = await db.collection('calls').doc(body.callId).get();

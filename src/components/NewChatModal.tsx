@@ -12,13 +12,14 @@ import { onAvatarError } from '../lib/avatar';
 interface NewChatModalProps {
   onClose: () => void;
   onSelectConversation: (conversationId: string) => void;
+  initialSearch?: string;
 }
 
-export function NewChatModal({ onClose, onSelectConversation }: NewChatModalProps) {
+export function NewChatModal({ onClose, onSelectConversation, initialSearch }: NewChatModalProps) {
   const { user, profile } = useAuth();
   const { addToast } = useNotification();
   const { isSavedContact, saveContactFor } = useDirectory();
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState(initialSearch || '');
   const [results, setResults] = useState<UserProfile[]>([]);
   const [searching, setSearching] = useState(false);
   const [searched, setSearched] = useState(false);

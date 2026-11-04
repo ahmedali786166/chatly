@@ -27,6 +27,7 @@ import {
   Download,
   MessageCircle,
   MoreVertical,
+  Phone,
   Plus,
   Search,
   Settings,
@@ -43,6 +44,7 @@ interface LeftSidebarProps {
   onSelectConversation: (id: string) => void;
   onOpenNewChat: () => void;
   onOpenNewGroup: () => void;
+  onOpenCalls: () => void;
   onOpenStatus: () => void;
   onOpenChannels: () => void;
   onOpenSettings: () => void;
@@ -55,6 +57,7 @@ export function LeftSidebar({
   onSelectConversation,
   onOpenNewChat,
   onOpenNewGroup,
+  onOpenCalls,
   onOpenStatus,
   onOpenChannels,
   onOpenSettings,
@@ -248,6 +251,7 @@ export function LeftSidebar({
     action: () => void | Promise<void>;
   }[] = [
     { label: 'New group', icon: Users, action: onOpenNewGroup },
+    { label: 'Calls', icon: Phone, action: onOpenCalls },
     { label: 'Status', icon: CircleDashed, action: onOpenStatus },
     { label: 'Channels', icon: Radio, action: onOpenChannels },
     { label: 'Archived chats', icon: Archive, action: () => setFilterTab('archived') },
@@ -320,6 +324,13 @@ export function LeftSidebar({
             title="New chat"
           >
             <Plus className="h-6 w-6" />
+          </button>
+          <button
+            onClick={onOpenCalls}
+            className="flex h-10 w-10 items-center justify-center rounded-full text-[#54656f] transition hover:bg-black/5 dark:text-[#aebac1] dark:hover:bg-white/5 md:hidden"
+            title="Calls"
+          >
+            <Phone className="h-6 w-6" />
           </button>
           <button
             onClick={onOpenStatus}

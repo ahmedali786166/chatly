@@ -23,6 +23,7 @@ import {
   onSnapshot,
   where,
 } from 'firebase/firestore';
+import type { DocumentReference } from 'firebase/firestore';
 import { auth, db, handleFirestoreError, OperationType } from '../firebase/config';
 import { UserProfile } from '../types';
 
@@ -39,6 +40,60 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const usernameChecked = new Set<string>();
+
+/** Picks a free @username so Gmail-alias sign-ins never collide. */
+async function uniqueUsername(base: string, uid: string) {
+  const clean =
+    base.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 18) ||
+    `user_${uid.slice(0, 5)}`.toLowerCase();
+
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const candidate = (attempt === 0 ? clean : `${clean}${attempt + 1}`).slice(0, 24);
+    try {
+      const taken = await getDocs(
+        query(collection(db, 'users'), where('username', '==', candidate))
+      );
+      if (taken.empty) return candidate;
+    } catch {
+      return `${clean}_${uid.slice(0, 4)}`.slice(0, 24).toLowerCase();
+    }
+  }
+  return `${clean}_${uid.slice(0, 4)}`.slice(0, 24).toLowerCase();
+}
+
+/**
+ * Older duplicate handles keep their name; a newer duplicate renames itself
+ * once, so repeated sign-ins eventually stop sharing an @username.
+ */
+async function releaseDuplicateUsername(
+  userRef: DocumentReference,
+  uid: string,
+  data: UserProfile
+) {
+  const username = (data.username || '').toLowerCase();
+  if (!username) return data;
+  try {
+    const matches = await getDocs(
+      query(collection(db, 'users'), where('username', '==', username))
+    );
+    if (matches.size < 2) return data;
+
+    const mineCreated = new Date(data.createdAt || 0).getTime();
+    const olderExists = matches.docs.some((docSnap) => {
+      if (docSnap.id === uid) return false;
+      const created = new Date((docSnap.data().createdAt as string) || 0).getTime();
+      return created > 0 && created < mineCreated;
+    });
+    if (!olderExists) return data;
+
+    const next = await uniqueUsername(username, uid);
+    await updateDoc(userRef, { username: next });
+    return { ...data, username: next };
+  } catch {
+    return data;
+  }
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -59,14 +114,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           userRef,
           async (snapshot) => {
             if (snapshot.exists()) {
-              setProfile(snapshot.data() as UserProfile);
+              const data = snapshot.data() as UserProfile;
+              setProfile(data);
+
+              if (!usernameChecked.has(currentUser.uid)) {
+                usernameChecked.add(currentUser.uid);
+                releaseDuplicateUsername(userRef, currentUser.uid, data).then((fixed) => {
+                  if (fixed.username !== data.username) setProfile(fixed);
+                });
+              }
             } else {
               // Create user profile document if not exists (e.g. initial Google sign in)
               const initialProfile: UserProfile = {
                 uid: currentUser.uid,
                 email: currentUser.email || '',
                 displayName: currentUser.displayName || currentUser.email?.split('@')[0] || 'User',
-                username: (currentUser.email?.split('@')[0] || 'user_' + currentUser.uid.slice(0, 5)).toLowerCase().replace(/[^a-z0-9_]/g, ''),
+                username: await uniqueUsername(
+                  currentUser.email?.split('@')[0] || '',
+                  currentUser.uid
+                ),
                 photoURL: currentUser.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${currentUser.uid}`,
                 bio: 'Hey there! I am using Chatly.',
                 isOnline: true,

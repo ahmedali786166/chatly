@@ -1,9 +1,14 @@
-import React, { useState } from 'react';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import React, { useEffect, useState } from 'react';
+import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { useAuth } from '../context/AuthContext';
 import { useNotification } from '../context/NotificationContext';
-import { registerPushToken } from '../services/push';
+import {
+  enablePushNotifications,
+  pushConfigured,
+  pushSupported,
+  registerPushToken,
+} from '../services/push';
 import { uploadFile } from '../services/storage';
 import { ImageCropModal } from './ImageCropModal';
 import { UserProfile } from '../types';
@@ -22,6 +27,12 @@ import {
   MessageCircle,
   Trash2,
   AlertTriangle,
+  Share2,
+  Copy,
+  Send,
+  Smartphone,
+  RefreshCw,
+  Link2,
 } from 'lucide-react';
 import { deleteUserAccount, usesPasswordSignIn } from '../services/account';
 
@@ -31,7 +42,7 @@ interface SettingsModalProps {
   setTheme: (theme: 'dark' | 'light') => void;
 }
 
-type Tab = 'profile' | 'appearance' | 'privacy' | 'notifications';
+type Tab = 'profile' | 'appearance' | 'privacy' | 'notifications' | 'invite';
 
 const WALLPAPERS = [
   { id: 'default', name: 'Doodle', hint: 'WhatsApp default' },
@@ -44,6 +55,7 @@ const TABS: { id: Tab; label: string; icon: React.ElementType; desc: string }[] 
   { id: 'appearance', label: 'Appearance', icon: Palette, desc: 'Theme and wallpaper' },
   { id: 'privacy', label: 'Privacy', icon: Shield, desc: 'Read receipts and presence' },
   { id: 'notifications', label: 'Notifications', icon: Bell, desc: 'Sounds and desktop alerts' },
+  { id: 'invite', label: 'Invite a friend', icon: Share2, desc: 'Share your Chatly link' },
 ];
 
 export function SettingsModal({ onClose, currentTheme, setTheme }: SettingsModalProps) {
@@ -67,6 +79,141 @@ export function SettingsModal({ onClose, currentTheme, setTheme }: SettingsModal
   const [pendingAvatar, setPendingAvatar] = useState<File | null>(null);
   const [deletePassword, setDeletePassword] = useState('');
   const [deleteError, setDeleteError] = useState('');
+  const [pushPermission, setPushPermission] = useState<string>(() =>
+    typeof Notification !== 'undefined' ? Notification.permission : 'unsupported'
+  );
+  const [tokenCount, setTokenCount] = useState<number | null>(null);
+  const [enablingPush, setEnablingPush] = useState(false);
+  const [testSending, setTestSending] = useState(false);
+
+  const refreshPushStatus = async () => {
+    if (typeof Notification !== 'undefined') setPushPermission(Notification.permission);
+    if (!user) return;
+    try {
+      const snap = await getDoc(doc(db, 'users', user.uid));
+      const tokens = snap.exists() ? ((snap.data().fcmTokens as string[] | undefined) || []) : [];
+      setTokenCount(tokens.length);
+    } catch {
+      setTokenCount(0);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'notifications') void refreshPushStatus();
+  }, [activeTab, user?.uid]);
+
+  const handleEnablePush = async () => {
+    if (!user) return;
+    setEnablingPush(true);
+    try {
+      const ok = await enablePushNotifications(user.uid);
+      await refreshPushStatus();
+      if (ok) {
+        addToast({
+          type: 'success',
+          title: 'Notifications enabled',
+          message: 'Alerts for messages and calls will reach this device.',
+        });
+      } else {
+        addToast({
+          type: 'warning',
+          title: 'Almost there',
+          message:
+            'Permission was granted but device registration failed. Check VITE_FIREBASE_VAPID_KEY and try again.',
+        });
+      }
+    } catch (err) {
+      addToast({
+        type: 'error',
+        title: 'Could not enable',
+        message: err instanceof Error ? err.message : 'Please try again.',
+      });
+    } finally {
+      setEnablingPush(false);
+    }
+  };
+
+  const handleTestNotification = async () => {
+    if (!user) return;
+    setTestSending(true);
+    try {
+      const idToken = await user.getIdToken();
+      const response = await fetch('/api/send-push', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({ test: true }),
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        sent?: number;
+        tokens?: number;
+        error?: string;
+      };
+      if (!response.ok) throw new Error(data.error || 'Server error');
+      await refreshPushStatus();
+      if ((data.sent || 0) > 0) {
+        addToast({
+          type: 'success',
+          title: 'Test sent',
+          message: `Delivered to ${data.sent} device${data.sent === 1 ? '' : 's'}.`,
+        });
+      } else {
+        addToast({
+          type: 'warning',
+          title: 'No device registered',
+          message: 'Enable notifications on this device first, then send a test again.',
+        });
+      }
+    } catch (err) {
+      addToast({
+        type: 'error',
+        title: 'Test failed',
+        message: err instanceof Error ? err.message : 'Please try again.',
+      });
+    } finally {
+      setTestSending(false);
+    }
+  };
+
+  const inviteHandle = (username || profile?.username || '').trim().replace(/^@/, '');
+  const inviteLink = `${window.location.origin}/?invite=${encodeURIComponent(
+    inviteHandle || user?.uid || ''
+  )}`;
+
+  const copyInviteLink = async () => {
+    try {
+      await navigator.clipboard.writeText(inviteLink);
+      addToast({ type: 'success', title: 'Link copied', message: 'Paste it anywhere to invite.' });
+    } catch {
+      window.prompt('Copy your invite link', inviteLink);
+    }
+  };
+
+  const shareInvite = async () => {
+    if (typeof navigator.share === 'function') {
+      try {
+        await navigator.share({
+          title: 'Join me on Chatly',
+          text: 'Chat with me on Chatly',
+          url: inviteLink,
+        });
+        return;
+      } catch {
+        // Sharing cancelled — fall through to copy.
+      }
+    }
+    await copyInviteLink();
+  };
+
+  const shareOnWhatsApp = () => {
+    window.open(
+      `https://wa.me/?text=${encodeURIComponent(`Chat with me on Chatly: ${inviteLink}`)}`,
+      '_blank',
+      'noopener,noreferrer'
+    );
+  };
 
   const handleDeleteAccount = async () => {
     if (!user) return;
@@ -551,19 +698,183 @@ export function SettingsModal({ onClose, currentTheme, setTheme }: SettingsModal
             )}
 
             {activeTab === 'notifications' && (
-              <div className="mx-auto max-w-[560px] overflow-hidden rounded-lg bg-[var(--wa-panel)] shadow-[0_1px_3px_rgba(11,20,26,0.08)]">
-                {toggleRow(
-                  'Message and call sounds',
-                  'Play a tone when messages arrive and when someone calls you.',
-                  soundEnabled,
-                  () => setSoundEnabled(!soundEnabled)
-                )}
-                {toggleRow(
-                  'Desktop notifications',
-                  'Show alerts for messages and calls even when Chatly is closed.',
-                  notificationsEnabled,
-                  handleToggleNotifications
-                )}
+              <div className="mx-auto max-w-[560px] space-y-4">
+                <div className="overflow-hidden rounded-lg bg-[var(--wa-panel)] shadow-[0_1px_3px_rgba(11,20,26,0.08)]">
+                  {toggleRow(
+                    'Message and call sounds',
+                    'Play a tone when messages arrive and when someone calls you.',
+                    soundEnabled,
+                    () => setSoundEnabled(!soundEnabled)
+                  )}
+                  {toggleRow(
+                    'Desktop notifications',
+                    'Show alerts for messages and calls even when Chatly is closed.',
+                    notificationsEnabled,
+                    handleToggleNotifications
+                  )}
+                </div>
+
+                <div className="overflow-hidden rounded-lg bg-[var(--wa-panel)] shadow-[0_1px_3px_rgba(11,20,26,0.08)]">
+                  <div className="border-b border-[var(--wa-border)] px-4 py-3.5">
+                    <p className="text-[14.5px] text-[var(--wa-text)]">This device</p>
+                    <p className="mt-0.5 text-[13px] leading-5 text-[var(--wa-text-2)]">
+                      Notifications must be allowed once per device. On iPhone, add Chatly to your
+                      Home Screen first.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3 border-b border-[var(--wa-border)] px-4 py-3">
+                    <span className="flex items-center gap-2 text-[13.5px] text-[var(--wa-text)]">
+                      <Bell className="h-4 w-4 text-[var(--wa-text-2)]" />
+                      Browser permission
+                    </span>
+                    <span
+                      className={`shrink-0 rounded-full px-2.5 py-0.5 text-[12px] font-medium ${
+                        pushPermission === 'granted'
+                          ? 'bg-[#d9fdd3] text-[#008069] dark:bg-[#005c4b] dark:text-[#e9edef]'
+                          : 'bg-[#ea0038]/10 text-[#ea0038]'
+                      }`}
+                    >
+                      {pushPermission === 'granted'
+                        ? 'Allowed'
+                        : pushPermission === 'denied'
+                        ? 'Blocked'
+                        : pushPermission === 'unsupported'
+                        ? 'Unsupported'
+                        : 'Not enabled'}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3 border-b border-[var(--wa-border)] px-4 py-3">
+                    <span className="flex items-center gap-2 text-[13.5px] text-[var(--wa-text)]">
+                      <Smartphone className="h-4 w-4 text-[var(--wa-text-2)]" />
+                      Registered devices
+                    </span>
+                    <span className="shrink-0 text-[13px] font-medium text-[var(--wa-text)]">
+                      {tokenCount === null ? '…' : tokenCount}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3 border-b border-[var(--wa-border)] px-4 py-3">
+                    <span className="flex items-center gap-2 text-[13.5px] text-[var(--wa-text)]">
+                      <Link2 className="h-4 w-4 text-[var(--wa-text-2)]" />
+                      Push configuration
+                    </span>
+                    <span
+                      className={`shrink-0 text-[12.5px] font-medium ${
+                        pushConfigured ? 'text-[#00a884]' : 'text-[#ea0038]'
+                      }`}
+                    >
+                      {pushConfigured ? 'Ready' : 'Missing VAPID key'}
+                    </span>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2 px-4 py-3">
+                    <button
+                      onClick={handleEnablePush}
+                      disabled={enablingPush || !pushConfigured}
+                      className="inline-flex items-center gap-2 rounded-full bg-[#00a884] px-4 py-2 text-[13px] font-medium text-white transition hover:bg-[#008069] disabled:opacity-50"
+                    >
+                      {enablingPush ? (
+                        <RefreshCw className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Bell className="h-4 w-4" />
+                      )}
+                      Enable on this device
+                    </button>
+                    <button
+                      onClick={handleTestNotification}
+                      disabled={testSending || !tokenCount}
+                      className="inline-flex items-center gap-2 rounded-full border border-[var(--wa-border)] px-4 py-2 text-[13px] font-medium text-[var(--wa-text)] transition hover:bg-[var(--wa-hover)] disabled:opacity-50"
+                    >
+                      {testSending ? (
+                        <RefreshCw className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Send className="h-4 w-4" />
+                      )}
+                      Send test
+                    </button>
+                  </div>
+
+                  {pushPermission === 'denied' && (
+                    <p className="border-t border-[var(--wa-border)] px-4 py-3 text-[12px] leading-5 text-[#ea0038]">
+                      Notifications are blocked for this site. Open your browser's site settings
+                      for Chatly and allow notifications, then reload the app.
+                    </p>
+                  )}
+                  {!pushSupported() && (
+                    <p className="border-t border-[var(--wa-border)] px-4 py-3 text-[12px] leading-5 text-[var(--wa-text-2)]">
+                      This browser does not support background notifications. On iPhone, install
+                      Chatly to the Home Screen and open it from there.
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'invite' && (
+              <div className="mx-auto max-w-[560px] space-y-4">
+                <div className="rounded-lg bg-[var(--wa-panel)] p-5 shadow-[0_1px_3px_rgba(11,20,26,0.08)]">
+                  <div className="flex items-start gap-3">
+                    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#00a884]/10">
+                      <Share2 className="h-5 w-5 text-[#00a884]" />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-[15px] font-medium text-[var(--wa-text)]">
+                        Invite your friends
+                      </p>
+                      <p className="mt-0.5 text-[13px] leading-5 text-[var(--wa-text-2)]">
+                        Share this link anywhere. It opens Chatly with your username already
+                        filled in, so they can start chatting with one tap.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex items-center gap-2 rounded-lg bg-[var(--wa-panel-2)] px-3 py-2.5">
+                    <Link2 className="h-4 w-4 shrink-0 text-[var(--wa-text-2)]" />
+                    <input
+                      readOnly
+                      value={inviteLink}
+                      onFocus={(e) => e.currentTarget.select()}
+                      className="min-w-0 flex-1 bg-transparent text-[13px] text-[var(--wa-text)] outline-none"
+                    />
+                  </div>
+
+                  {!inviteHandle && (
+                    <p className="mt-2 text-[12px] leading-5 text-[#ea0038]">
+                      Set a username in the Profile tab so this link points to you.
+                    </p>
+                  )}
+
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      onClick={copyInviteLink}
+                      className="inline-flex items-center gap-2 rounded-full bg-[#00a884] px-4 py-2 text-[13px] font-medium text-white transition hover:bg-[#008069]"
+                    >
+                      <Copy className="h-4 w-4" />
+                      Copy link
+                    </button>
+                    <button
+                      onClick={shareInvite}
+                      className="inline-flex items-center gap-2 rounded-full border border-[var(--wa-border)] px-4 py-2 text-[13px] font-medium text-[var(--wa-text)] transition hover:bg-[var(--wa-hover)]"
+                    >
+                      <Share2 className="h-4 w-4" />
+                      Share
+                    </button>
+                    <button
+                      onClick={shareOnWhatsApp}
+                      className="inline-flex items-center gap-2 rounded-full border border-[var(--wa-border)] px-4 py-2 text-[13px] font-medium text-[var(--wa-text)] transition hover:bg-[var(--wa-hover)]"
+                    >
+                      <MessageCircle className="h-4 w-4" />
+                      WhatsApp
+                    </button>
+                  </div>
+                </div>
+
+                <p className="px-1 text-[12px] leading-5 text-[var(--wa-text-2)]">
+                  Your invite link only shares your username — never your email, phone number or
+                  messages.
+                </p>
               </div>
             )}
           </div>

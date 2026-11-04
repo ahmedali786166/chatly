@@ -57,6 +57,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const unsubscribeCallRef = useRef<(() => void) | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const activeCallRef = useRef<CallSession | null>(null);
+  const outgoingTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     localStreamRef.current = localStream;
@@ -111,6 +112,28 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     };
   }, [uid]);
 
+  // Fallback: if the caller's tab died, stop ringing after 60s and log a miss.
+  useEffect(() => {
+    if (!incomingCall) return;
+    if (incomingCall.status !== 'calling' && incomingCall.status !== 'ringing') return;
+    const callId = incomingCall.id;
+    const timer = window.setTimeout(async () => {
+      try {
+        const snap = await getDoc(doc(db, 'calls', callId));
+        const data = snap.data();
+        if (data && (data.status === 'calling' || data.status === 'ringing')) {
+          await updateDoc(doc(db, 'calls', callId), {
+            status: 'missed',
+            endedAt: new Date().toISOString(),
+          });
+        }
+      } catch {
+        // The caller may have ended it already.
+      }
+    }, 60000);
+    return () => window.clearTimeout(timer);
+  }, [incomingCall?.id, incomingCall?.status]);
+
   // Duration timer when call is ongoing
   useEffect(() => {
     if (activeCall?.status === 'ongoing') {
@@ -154,6 +177,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     setRemoteStream(null);
     sounds.stopDialTone();
     sounds.stopRingtone();
+    if (outgoingTimeoutRef.current) {
+      clearTimeout(outgoingTimeoutRef.current);
+      outgoingTimeoutRef.current = null;
+    }
     if (unsubscribeCallRef.current) {
       unsubscribeCallRef.current();
       unsubscribeCallRef.current = null;
@@ -212,6 +239,17 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       setActiveCall(callData);
       sounds.startDialTone();
 
+      // Nobody picked up: close the call so both sides log it as missed.
+      outgoingTimeoutRef.current = window.setTimeout(() => {
+        outgoingTimeoutRef.current = null;
+        const current = activeCallRef.current;
+        if (!current || current.id !== callData.id || current.status === 'ongoing') return;
+        updateDoc(callDocRef, {
+          status: 'missed',
+          endedAt: new Date().toISOString(),
+        }).catch(() => {});
+      }, 45000);
+
       // Alert the receiver's device even when their app is closed.
       user
         .getIdToken()
@@ -242,7 +280,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         const data = snapshot.data() as CallSession | undefined;
         if (!data) return;
 
-        if (data.status === 'rejected' || data.status === 'ended') {
+        if (data.status === 'rejected' || data.status === 'ended' || data.status === 'missed') {
           sounds.playEndCall();
           cleanupStreams();
           setActiveCall(null);
@@ -356,7 +394,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       // Listen for call termination
       const unsubscribe = onSnapshot(callDocRef, (snap) => {
         const d = snap.data();
-        if (d?.status === 'ended') {
+        if (d?.status === 'ended' || d?.status === 'rejected' || d?.status === 'missed') {
           sounds.playEndCall();
           cleanupStreams();
           setActiveCall(null);
