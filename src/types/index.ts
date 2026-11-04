@@ -114,6 +114,7 @@ export interface StatusStory {
   expiresAtMs?: number; // numeric mirror used by Firestore security rules
   publicId?: string; // Cloudinary public id for media cleanup
   deleteToken?: string; // Cloudinary delete token for media cleanup
+  resourceType?: 'image' | 'video'; // Cloudinary resource type for admin deletion
 }
 
 export interface Channel {

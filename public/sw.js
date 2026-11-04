@@ -38,6 +38,8 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith('/__/')) return;
+  // Never cache API responses (cleanup endpoint and future dynamic routes).
+  if (url.pathname.startsWith('/api/')) return;
 
   // App navigation: always try the network so a new deploy is picked up.
   // Fall back to the offline page only when the device is offline.

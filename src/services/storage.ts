@@ -23,6 +23,7 @@ export interface UploadResult {
   url: string;
   publicId?: string;
   deleteToken?: string;
+  resourceType?: string;
 }
 
 async function uploadToCloudinaryDetailed(
@@ -49,6 +50,7 @@ async function uploadToCloudinaryDetailed(
     secure_url?: string;
     public_id?: string;
     delete_token?: string;
+    resource_type?: string;
   };
   if (!data.secure_url) throw new Error('Cloudinary returned no URL');
   if (onProgress) onProgress(100);
@@ -56,6 +58,7 @@ async function uploadToCloudinaryDetailed(
     url: data.secure_url,
     publicId: data.public_id,
     deleteToken: data.delete_token,
+    resourceType: data.resource_type,
   };
 }
 
