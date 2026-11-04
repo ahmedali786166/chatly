@@ -1,6 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Message } from '../types';
 import { useAuth } from '../context/AuthContext';
+import { useDirectory } from '../context/DirectoryContext';
+import { formatTime12 } from '../lib/time';
+import { onAvatarError } from '../lib/avatar';
 import {
   Check,
   CheckCheck,
@@ -50,12 +53,6 @@ const senderColor = (id: string) => {
   return SENDER_COLORS[hash % SENDER_COLORS.length];
 };
 
-const formatTime = (iso: string) => {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-};
-
 const formatDuration = (seconds: number) => {
   if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
   const mins = Math.floor(seconds / 60);
@@ -76,6 +73,7 @@ export function MessageItem({
   onEdit,
 }: MessageItemProps) {
   const { user } = useAuth();
+  const { displayNameFor, photoFor } = useDirectory();
   const [showMenu, setShowMenu] = useState(false);
   const [showReactions, setShowReactions] = useState(false);
   const [playing, setPlaying] = useState(false);
@@ -149,9 +147,10 @@ export function MessageItem({
       <div className={`flex max-w-full items-end gap-1.5 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
         {!isMe && isGroup && (
           <img
-            src={message.senderPhoto || `https://api.dicebear.com/7.x/bottts/svg?seed=${message.senderId}`}
+            src={photoFor(message.senderId, message.senderPhoto)}
             alt=""
             className="mb-1 h-7 w-7 shrink-0 rounded-full object-cover"
+            onError={(e) => onAvatarError(e, message.senderId)}
           />
         )}
 
@@ -190,7 +189,7 @@ export function MessageItem({
                 className="mb-0.5 px-0.5 text-[12.5px] font-semibold"
                 style={{ color: senderColor(message.senderId) }}
               >
-                {message.senderName}
+                {displayNameFor(message.senderId, message.senderName)}
               </div>
             )}
 
@@ -314,7 +313,7 @@ export function MessageItem({
               {message.pinned && <Pin className="h-3 w-3" />}
               {isStarred && <Star className="h-3 w-3 fill-current text-[#ffbc38]" />}
               {message.isEdited && <span className="italic">edited</span>}
-              <span className="tabular-nums">{formatTime(message.createdAt)}</span>
+              <span className="tabular-nums">{formatTime12(message.createdAt)}</span>
               {isMe &&
                 (othersRead ? (
                   <CheckCheck className="h-3.5 w-3.5 text-[#53bdeb]" />

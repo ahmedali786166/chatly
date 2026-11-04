@@ -16,6 +16,14 @@ export interface UserProfile {
   blockedUsers?: string[];
 }
 
+export interface Contact {
+  id: string; // contact owner's uid + "_" + contact uid
+  ownerId: string;
+  contactUid: string;
+  nickname?: string;
+  createdAt: string;
+}
+
 export type ConversationType = 'direct' | 'group';
 
 export interface ParticipantDetail {
@@ -103,6 +111,9 @@ export interface StatusStory {
   viewers: string[]; // array of userIds
   createdAt: string;
   expiresAt: string;
+  expiresAtMs?: number; // numeric mirror used by Firestore security rules
+  publicId?: string; // Cloudinary public id for media cleanup
+  deleteToken?: string; // Cloudinary delete token for media cleanup
 }
 
 export interface Channel {

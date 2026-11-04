@@ -24,12 +24,30 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/conversations/$(convId)).data;
     }
 
+    // True when the signed-in viewer saved this user in their own contacts.
+    function hasSavedUser(userId) {
+      return isSignedIn() && exists(
+        /databases/$(database)/documents/contacts/$(request.auth.uid + '_' + userId)
+      );
+    }
+
     // User profiles
     match /users/{userId} {
       allow read: if isSignedIn();
       allow create: if isOwner(userId) && request.resource.data.uid == userId;
       allow update: if isOwner(userId) && request.resource.data.uid == userId;
       allow delete: if isOwner(userId);
+    }
+
+    // Saved contacts (nicknames are private to their owner)
+    match /contacts/{contactId} {
+      allow read, update, delete: if isSignedIn() && (
+        resource.data.ownerId == request.auth.uid
+      );
+      allow create: if isSignedIn() && (
+        request.resource.data.ownerId == request.auth.uid &&
+        request.resource.data.contactUid is string
+      );
     }
 
     // Conversations
@@ -67,12 +85,22 @@ service cloud.firestore {
       }
     }
 
-    // Status stories (24h)
+    // Status stories (24h). Only the creator and people who saved the creator
+    // in their own contacts can read them; expired stories may be cleaned up.
     match /statuses/{statusId} {
-      allow read: if isSignedIn();
+      allow read: if (
+        isOwner(resource.data.userId) ||
+        hasSavedUser(resource.data.userId)
+      );
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      allow update: if isSignedIn();
-      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow update: if (
+        isOwner(resource.data.userId) ||
+        hasSavedUser(resource.data.userId)
+      );
+      allow delete: if isSignedIn() && (
+        isOwner(resource.data.userId) ||
+        resource.data.get('expiresAtMs', 0) <= request.time.toMillis()
+      );
     }
 
     // Channels

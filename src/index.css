@@ -168,6 +168,25 @@ html.dark {
   letter-spacing: 0.01em;
 }
 
+/* Mobile: bubbles get the full width of the chat column instead of being
+   squeezed by the desktop max-width, and media never overflows the viewport. */
+@media (max-width: 640px) {
+  .wa-bubble {
+    max-width: 88%;
+  }
+
+  .wa-bubble img,
+  .wa-bubble video {
+    max-width: 100%;
+    height: auto;
+  }
+}
+
+/* Keeps the message composer above the Android/iOS home indicator. */
+.composer-safe {
+  padding-bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));
+}
+
 /* Utility animations */
 @keyframes wa-fade-in {
   from { opacity: 0; }

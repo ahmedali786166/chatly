@@ -3,7 +3,11 @@ import { arrayRemove, arrayUnion, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { Conversation, Message } from '../types';
 import { useAuth } from '../context/AuthContext';
+import { useDirectory } from '../context/DirectoryContext';
 import { useNotification } from '../context/NotificationContext';
+import { onAvatarError } from '../lib/avatar';
+import { ProfilePhotoViewer } from './ProfilePhotoViewer';
+import { ContactDialog } from './ContactDialog';
 import {
   X,
   Bell,
@@ -29,11 +33,25 @@ interface RightSidebarProps {
 export function RightSidebar({ conversation, messages, onClose }: RightSidebarProps) {
   const { user, profile } = useAuth();
   const { addToast } = useNotification();
+  const {
+    directory,
+    displayNameFor,
+    photoFor,
+    nicknameFor,
+    isSavedContact,
+    saveContactFor,
+    removeContactFor,
+  } = useDirectory();
   const [activeMediaTab, setActiveMediaTab] = useState<'media' | 'docs' | 'starred'>('media');
+  const [showPhoto, setShowPhoto] = useState(false);
+  const [showContactDialog, setShowContactDialog] = useState(false);
 
   const isGroup = conversation.type === 'group';
   const otherUserId = conversation.participantIds.find((id) => id !== user?.uid);
   const otherUserDetail = otherUserId ? conversation.participantDetails?.[otherUserId] : null;
+  const otherUser = otherUserId ? directory[otherUserId] : undefined;
+  const otherName = displayNameFor(otherUserId, otherUserDetail?.displayName || 'Contact');
+  const otherPhoto = photoFor(otherUserId, otherUserDetail?.photoURL);
 
   const isMuted = !!conversation.mutedBy?.includes(user?.uid || '');
   const isBlocked = !!otherUserId && !!profile?.blockedUsers?.includes(otherUserId);
@@ -103,21 +121,35 @@ export function RightSidebar({ conversation, messages, onClose }: RightSidebarPr
         <div className="flex-1 overflow-y-auto">
           {/* Profile */}
           <div className="flex flex-col items-center bg-[var(--wa-panel)] px-6 pb-6 pt-8">
-            <img
-              src={
-                isGroup
-                  ? conversation.groupInfo?.photoURL ||
-                    `https://api.dicebear.com/7.x/identicon/svg?seed=${conversation.id}`
-                  : otherUserDetail?.photoURL ||
-                    `https://api.dicebear.com/7.x/bottts/svg?seed=${otherUserId}`
-              }
-              alt=""
-              className="h-40 w-40 rounded-full object-cover shadow-sm"
-            />
+            <button
+              onClick={() => !isGroup && setShowPhoto(true)}
+              className="rounded-full transition hover:opacity-95"
+              title={isGroup ? 'Group photo' : 'View profile photo'}
+            >
+              <img
+                src={
+                  isGroup
+                    ? conversation.groupInfo?.photoURL ||
+                      `https://api.dicebear.com/7.x/identicon/svg?seed=${conversation.id}`
+                    : otherPhoto || `https://api.dicebear.com/7.x/bottts/svg?seed=${otherUserId}`
+                }
+                alt=""
+                className="h-40 w-40 rounded-full object-cover shadow-sm"
+                onError={(e) =>
+                  onAvatarError(e, isGroup ? conversation.id : otherUserId, isGroup ? 'identicon' : 'bottts')
+                }
+              />
+            </button>
 
             <h3 className="mt-4 text-center text-[20px] font-normal text-[var(--wa-text)]">
-              {isGroup ? conversation.groupInfo?.name : otherUserDetail?.displayName || 'Contact'}
+              {isGroup ? conversation.groupInfo?.name : otherName}
             </h3>
+
+            {!isGroup && nicknameFor(otherUserId) && otherUser?.displayName && (
+              <p className="mt-0.5 text-[12px] text-[var(--wa-text-3)]">
+                {otherUser.displayName}
+              </p>
+            )}
 
             <p className="mt-0.5 text-[13px] text-[var(--wa-text-2)]">
               {isGroup ? (
@@ -125,7 +157,7 @@ export function RightSidebar({ conversation, messages, onClose }: RightSidebarPr
                   <Users className="h-3.5 w-3.5" />
                   Group · {conversation.participantIds.length} members
                 </span>
-              ) : otherUserDetail?.isOnline ? (
+              ) : (otherUser?.isOnline ?? otherUserDetail?.isOnline) ? (
                 'online'
               ) : (
                 otherUserDetail?.email || 'offline'
@@ -189,13 +221,14 @@ export function RightSidebar({ conversation, messages, onClose }: RightSidebarPr
                     >
                       <div className="flex min-w-0 items-center gap-3">
                         <img
-                          src={detail?.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${memberId}`}
+                          src={photoFor(memberId, detail?.photoURL)}
                           alt=""
                           className="h-9 w-9 rounded-full object-cover"
+                          onError={(e) => onAvatarError(e, memberId)}
                         />
                         <div className="min-w-0">
                           <div className="truncate text-[13px] font-medium text-[var(--wa-text)]">
-                            {detail?.displayName || (me ? 'You' : 'Member')}
+                            {me ? 'You' : displayNameFor(memberId, detail?.displayName || 'Member')}
                             {me && <span className="ml-1 text-[11px] font-normal text-[var(--wa-text-2)]">(You)</span>}
                           </div>
                           <div className="text-[11.5px] text-[var(--wa-text-2)]">
@@ -315,6 +348,21 @@ export function RightSidebar({ conversation, messages, onClose }: RightSidebarPr
             )}
           </div>
 
+          {/* Contacts */}
+          {!isGroup && otherUserId && (
+            <div className="border-b border-[var(--wa-border)] px-2 py-3">
+              <button
+                onClick={() => setShowContactDialog(true)}
+                className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-[13.5px] font-medium text-[#00a884] transition hover:bg-[var(--wa-hover)]"
+              >
+                <UserCheck className="h-4 w-4" />
+                {isSavedContact(otherUserId)
+                  ? `Edit contact${nicknameFor(otherUserId) ? ` (${nicknameFor(otherUserId)})` : ''}`
+                  : 'Add to contacts'}
+              </button>
+            </div>
+          )}
+
           {/* Privacy */}
           <div className="px-2 py-3">
             {!isGroup && (
@@ -357,6 +405,45 @@ export function RightSidebar({ conversation, messages, onClose }: RightSidebarPr
           )}
         </div>
       </aside>
+
+      {showPhoto && !isGroup && otherUserId && (
+        <ProfilePhotoViewer
+          src={otherPhoto || `https://api.dicebear.com/7.x/bottts/svg?seed=${otherUserId}`}
+          name={otherName}
+          onClose={() => setShowPhoto(false)}
+        />
+      )}
+
+      {showContactDialog && otherUserId && (
+        <ContactDialog
+          personName={otherUser?.displayName || otherUserDetail?.displayName || 'Contact'}
+          initialNickname={nicknameFor(otherUserId) || ''}
+          isSaved={isSavedContact(otherUserId)}
+          onSave={async (nickname) => {
+            try {
+              await saveContactFor(otherUserId, nickname);
+              setShowContactDialog(false);
+              addToast({
+                title: 'Contact saved',
+                message: nickname ? `Saved as “${nickname}”.` : 'Added to your contacts.',
+                type: 'success',
+              });
+            } catch {
+              addToast({ title: 'Could not save contact', message: 'Please try again.', type: 'error' });
+            }
+          }}
+          onRemove={async () => {
+            try {
+              await removeContactFor(otherUserId);
+              setShowContactDialog(false);
+              addToast({ title: 'Contact removed', message: 'Removed from your contacts.', type: 'success' });
+            } catch {
+              addToast({ title: 'Could not remove contact', message: 'Please try again.', type: 'error' });
+            }
+          }}
+          onClose={() => setShowContactDialog(false)}
+        />
+      )}
     </>
   );
 }

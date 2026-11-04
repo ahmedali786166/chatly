@@ -19,16 +19,23 @@ const CLOUDINARY_UPLOAD_PRESET = 'chatly';
 const cloudinaryConfigured = () =>
   CLOUDINARY_CLOUD_NAME.length > 0 && CLOUDINARY_UPLOAD_PRESET.length > 0;
 
-async function uploadToCloudinary(
+export interface UploadResult {
+  url: string;
+  publicId?: string;
+  deleteToken?: string;
+}
+
+async function uploadToCloudinaryDetailed(
   file: Blob,
   path: string,
   onProgress?: UploadProgressCallback
-): Promise<string> {
+): Promise<UploadResult> {
   const filename = path.split('/').pop() || 'file';
+  const publicId = path.replace(/\.[a-z0-9]+$/i, '').replace(/[^\w\-/]+/g, '_');
   const form = new FormData();
   form.append('file', file, filename);
   form.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
-  form.append('public_id', path.replace(/\.[a-z0-9]+$/i, '').replace(/[^\w\-/]+/g, '_'));
+  form.append('public_id', publicId);
 
   const response = await fetch(
     `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/auto/upload`,
@@ -38,10 +45,40 @@ async function uploadToCloudinary(
     const detail = await response.text().catch(() => '');
     throw new Error(`Cloudinary upload failed (${response.status}): ${detail.slice(0, 160)}`);
   }
-  const data = (await response.json()) as { secure_url?: string };
+  const data = (await response.json()) as {
+    secure_url?: string;
+    public_id?: string;
+    delete_token?: string;
+  };
   if (!data.secure_url) throw new Error('Cloudinary returned no URL');
   if (onProgress) onProgress(100);
-  return data.secure_url;
+  return {
+    url: data.secure_url,
+    publicId: data.public_id,
+    deleteToken: data.delete_token,
+  };
+}
+
+/**
+ * Deletes an unsigned Cloudinary upload using the delete token returned at
+ * upload time. The preset must have "Return delete token" enabled in the
+ * Cloudinary console for the token to be issued. Returns false when the media
+ * could not be removed (already gone, token missing, or token disabled).
+ */
+export async function deleteCloudinaryMedia(deleteToken?: string): Promise<boolean> {
+  if (!deleteToken || !cloudinaryConfigured()) return false;
+  try {
+    const form = new FormData();
+    form.append('token', deleteToken);
+    const response = await fetch(
+      `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/delete_by_token`,
+      { method: 'POST', body: form }
+    );
+    return response.ok;
+  } catch (error) {
+    console.warn('Cloudinary media cleanup failed:', error);
+    return false;
+  }
 }
 
 /**
@@ -129,11 +166,23 @@ export async function uploadFile(
   path: string,
   onProgress?: UploadProgressCallback
 ): Promise<string> {
+  return (await uploadFileDetailed(file, path, onProgress)).url;
+}
+
+/**
+ * Same upload chain as uploadFile but also reports the Cloudinary public id and
+ * delete token so expiring media (status stories) can be removed later.
+ */
+export async function uploadFileDetailed(
+  file: File | Blob,
+  path: string,
+  onProgress?: UploadProgressCallback
+): Promise<UploadResult> {
   const prepared = await compressImage(file);
 
   if (cloudinaryConfigured()) {
     try {
-      return await uploadToCloudinary(prepared, path, onProgress);
+      return await uploadToCloudinaryDetailed(prepared, path, onProgress);
     } catch (error) {
       console.warn('Cloudinary upload failed, trying Firebase Storage:', error);
     }
@@ -142,7 +191,7 @@ export async function uploadFile(
   try {
     const url = await uploadToStorage(prepared, path, onProgress);
     if (onProgress) onProgress(100);
-    return url;
+    return { url };
   } catch (error) {
     console.warn('Firebase Storage upload unavailable, using inline media fallback:', error);
   }
@@ -154,7 +203,7 @@ export async function uploadFile(
     );
   }
   if (onProgress) onProgress(100);
-  return dataUrl;
+  return { url: dataUrl };
 }
 
 export function fileToDataUrl(file: File | Blob): Promise<string> {

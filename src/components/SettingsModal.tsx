@@ -1,7 +1,11 @@
 import React, { useState } from 'react';
+import { collection, getDocs, query, where } from 'firebase/firestore';
+import { db } from '../firebase/config';
 import { useAuth } from '../context/AuthContext';
 import { useNotification } from '../context/NotificationContext';
 import { uploadFile } from '../services/storage';
+import { ImageCropModal } from './ImageCropModal';
+import { UserProfile } from '../types';
 import {
   X,
   User,
@@ -18,7 +22,7 @@ import {
   Trash2,
   AlertTriangle,
 } from 'lucide-react';
-import { deleteUserAccount } from '../services/account';
+import { deleteUserAccount, usesPasswordSignIn } from '../services/account';
 
 interface SettingsModalProps {
   onClose: () => void;
@@ -59,47 +63,61 @@ export function SettingsModal({ onClose, currentTheme, setTheme }: SettingsModal
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [pendingAvatar, setPendingAvatar] = useState<File | null>(null);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteError, setDeleteError] = useState('');
 
   const handleDeleteAccount = async () => {
     if (!user) return;
+    setDeleteError('');
+    if (usesPasswordSignIn(user) && !deletePassword) {
+      setDeleteError('Enter your password to confirm.');
+      return;
+    }
     setDeleting(true);
     try {
-      await deleteUserAccount(user);
-      addToast({ type: 'success', title: 'Account deleted', message: 'Your account and data were removed.' });
+      await deleteUserAccount(user, deletePassword);
+      addToast({ type: 'success', title: 'Account deleted', message: 'Your account and all related data were removed.' });
       setConfirmDelete(false);
-      logout();
+      await logout();
       onClose();
     } catch (err: unknown) {
       const code = typeof err === 'object' && err !== null && 'code' in err ? String((err as { code?: string }).code) : '';
-      if (code === 'auth/requires-recent-login') {
-        addToast({
-          type: 'warning',
-          title: 'Log in again first',
-          message: 'For security, log out and log back in, then delete your account.',
-        });
-      } else {
-        addToast({
-          type: 'error',
-          title: 'Could not delete account',
-          message: err instanceof Error ? err.message : 'Please try again.',
-        });
+      let message = err instanceof Error ? err.message : 'Please try again.';
+      if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
+        message = 'Incorrect password. Please try again.';
+      } else if (code === 'auth/requires-recent-login') {
+        message = 'Please log out, log back in, and try deleting again.';
+      } else if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+        message = 'Google confirmation was cancelled.';
+      } else if (code === 'auth/too-many-requests') {
+        message = 'Too many attempts. Please wait a few minutes and try again.';
       }
-      setConfirmDelete(false);
+      setDeleteError(message);
     } finally {
       setDeleting(false);
     }
   };
 
-  const handleAvatarSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAvatarSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0 || !user) return;
-    const file = e.target.files[0];
+    setPendingAvatar(e.target.files[0]);
+    e.target.value = '';
+  };
+
+  const handleCroppedAvatar = async (blob: Blob, previewUrl: string) => {
+    if (!user) return;
+    const file = new File([blob], 'avatar.jpg', { type: 'image/jpeg' });
+    setPendingAvatar(null);
     setUploadingAvatar(true);
+    setAvatarUrl(previewUrl);
     try {
       const url = await uploadFile(file, `avatars/${user.uid}_${Date.now()}`);
       setAvatarUrl(url);
       await updateProfileData({ photoURL: url });
       addToast({ type: 'success', title: 'Photo updated', message: 'Your profile picture changed.' });
     } catch {
+      setAvatarUrl(profile?.photoURL || '');
       addToast({ type: 'error', title: 'Upload failed', message: 'Could not upload the image.' });
     } finally {
       setUploadingAvatar(false);
@@ -107,11 +125,41 @@ export function SettingsModal({ onClose, currentTheme, setTheme }: SettingsModal
   };
 
   const handleSave = async () => {
+    const cleanUsername = username.trim().toLowerCase().replace(/^@/, '');
+    if (cleanUsername) {
+      if (!/^[a-z0-9_]{3,24}$/.test(cleanUsername)) {
+        addToast({
+          type: 'error',
+          title: 'Invalid username',
+          message: 'Use 3–24 letters, numbers or underscores.',
+        });
+        return;
+      }
+      if (cleanUsername !== (profile?.username || '')) {
+        try {
+          const snap = await getDocs(
+            query(collection(db, 'users'), where('username', '==', cleanUsername))
+          );
+          const taken = snap.docs.some((d) => (d.data() as UserProfile).uid !== user?.uid);
+          if (taken) {
+            addToast({
+              type: 'error',
+              title: 'Username taken',
+              message: 'Someone already uses that username. Try another one.',
+            });
+            return;
+          }
+        } catch (err) {
+          console.warn('Username check failed:', err);
+        }
+      }
+    }
+
     setSaving(true);
     try {
       await updateProfileData({
         displayName: displayName.trim(),
-        username: username.trim().toLowerCase(),
+        username: cleanUsername,
         bio: bio.trim(),
         chatWallpaper,
         soundEnabled,
@@ -545,6 +593,31 @@ export function SettingsModal({ onClose, currentTheme, setTheme }: SettingsModal
               This permanently deletes your profile, statuses, channels and all your conversations.
               This cannot be undone.
             </p>
+
+            {user && usesPasswordSignIn(user) ? (
+              <label className="mt-4 block">
+                <span className="text-[12.5px] text-[var(--wa-text-2)]">
+                  Confirm with your password
+                </span>
+                <input
+                  type="password"
+                  value={deletePassword}
+                  onChange={(e) => setDeletePassword(e.target.value)}
+                  placeholder="Password"
+                  autoComplete="current-password"
+                  className="mt-1 w-full rounded-lg border border-[var(--wa-border)] bg-[var(--wa-panel-2)] px-3 py-2 text-[14px] text-[var(--wa-text)] outline-none focus:border-[#00a884]"
+                />
+              </label>
+            ) : (
+              <p className="mt-3 text-[12.5px] text-[var(--wa-text-2)]">
+                You will be asked to confirm with Google before this is completed.
+              </p>
+            )}
+
+            {deleteError && (
+              <p className="mt-2 text-[12.5px] font-medium text-[#ea0038]">{deleteError}</p>
+            )}
+
             <div className="mt-5 flex justify-end gap-2">
               <button
                 onClick={() => setConfirmDelete(false)}
@@ -563,6 +636,14 @@ export function SettingsModal({ onClose, currentTheme, setTheme }: SettingsModal
             </div>
           </div>
         </div>
+      )}
+      {pendingAvatar && (
+        <ImageCropModal
+          file={pendingAvatar}
+          title="Crop profile photo"
+          onCancel={() => setPendingAvatar(null)}
+          onComplete={handleCroppedAvatar}
+        />
       )}
     </div>
   );

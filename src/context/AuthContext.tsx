@@ -8,14 +8,20 @@ import {
   signInWithPopup,
   GoogleAuthProvider,
   sendPasswordResetEmail,
+  deleteUser,
   updateProfile as updateFirebaseProfile
 } from 'firebase/auth';
 import {
+  collection,
   doc,
   getDoc,
+  getDocs,
+  query,
   setDoc,
   updateDoc,
+  deleteDoc,
   onSnapshot,
+  where,
 } from 'firebase/firestore';
 import { auth, db, handleFirestoreError, OperationType } from '../firebase/config';
 import { UserProfile } from '../types';
@@ -145,7 +151,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [user]);
 
   const signUp = async (email: string, pass: string, displayName: string, username: string) => {
+    const cleanUsername = username.trim().toLowerCase().replace(/^@/, '');
+    if (!/^[a-z0-9_]{3,24}$/.test(cleanUsername)) {
+      throw new Error('Username must be 3–24 characters using letters, numbers or underscores.');
+    }
+
+    // Username uniqueness needs an authenticated read (users are private),
+    // so create the auth account first and roll it back if the name is taken.
     const cred = await createUserWithEmailAndPassword(auth, email, pass);
+
+    const takenSnap = await getDocs(
+      query(collection(db, 'users'), where('username', '==', cleanUsername))
+    );
+    if (!takenSnap.empty) {
+      try {
+        await deleteDoc(doc(db, 'users', cred.user.uid));
+      } catch {
+        // Best effort: removing the orphan profile is not critical
+      }
+      await deleteUser(cred.user).catch(() => {});
+      throw new Error('That username is already taken. Please choose another one.');
+    }
+
     const photoURL = `https://api.dicebear.com/7.x/bottts/svg?seed=${cred.user.uid}`;
     
     await updateFirebaseProfile(cred.user, { displayName, photoURL });
@@ -154,7 +181,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       uid: cred.user.uid,
       email: cred.user.email || email,
       displayName,
-      username: username.toLowerCase().trim(),
+      username: cleanUsername,
       photoURL,
       bio: 'Hey there! I am using Chatly.',
       isOnline: true,

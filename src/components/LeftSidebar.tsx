@@ -12,13 +12,18 @@ import {
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase/config';
 import { useAuth } from '../context/AuthContext';
+import { useDirectory } from '../context/DirectoryContext';
 import { useNotification } from '../context/NotificationContext';
+import { usePwaInstall } from '../hooks/usePwaInstall';
 import { sounds } from '../services/sound';
+import { formatTime12 } from '../lib/time';
+import { onAvatarError } from '../lib/avatar';
 import { Conversation } from '../types';
 import {
   Archive,
   BellOff,
   CheckCheck,
+  Download,
   MessageCircle,
   MoreVertical,
   Plus,
@@ -55,6 +60,8 @@ export function LeftSidebar({
 }: LeftSidebarProps) {
   const { user, profile } = useAuth();
   const { addToast, sendPushNotification } = useNotification();
+  const { canInstall, promptInstall } = usePwaInstall();
+  const { displayNameFor, photoFor, nicknameFor, directory } = useDirectory();
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [filterTab, setFilterTab] = useState<FilterTab>('all');
@@ -108,12 +115,12 @@ export function LeftSidebar({
             const title =
               conv.type === 'group'
                 ? conv.groupInfo?.name || 'Group'
-                : conv.participantDetails?.[otherId]?.displayName || 'New message';
+                : displayNameFor(otherId, conv.participantDetails?.[otherId]?.displayName || 'New message');
             const body = conv.lastMessage?.text || 'New message';
             const avatar =
               conv.type === 'group'
                 ? conv.groupInfo?.photoURL
-                : conv.participantDetails?.[otherId]?.photoURL;
+                : photoFor(otherId, conv.participantDetails?.[otherId]?.photoURL);
 
             addToast({
               title,
@@ -177,7 +184,9 @@ export function LeftSidebar({
         const otherId = c.participantIds.find((id) => id !== user?.uid);
         const other = otherId ? c.participantDetails?.[otherId] : null;
         return (
-          (other?.displayName || '').toLowerCase().includes(q) ||
+          displayNameFor(otherId, other?.displayName || '').toLowerCase().includes(q) ||
+          (nicknameFor(otherId) || '').toLowerCase().includes(q) ||
+          (directory[otherId || '']?.username || '').toLowerCase().includes(q) ||
           (other?.email || '').toLowerCase().includes(q) ||
           (c.lastMessage?.text || '').toLowerCase().includes(q)
         );
@@ -194,7 +203,7 @@ export function LeftSidebar({
           new Date(a.updatedAt || a.createdAt).getTime()
         );
       });
-  }, [conversations, filterTab, searchQuery, user?.uid]);
+  }, [conversations, filterTab, searchQuery, user?.uid, displayNameFor, nicknameFor, directory]);
 
   const formatTime = (isoString?: string) => {
     if (!isoString) return '';
@@ -206,7 +215,7 @@ export function LeftSidebar({
     const time = date.getTime();
 
     if (time >= startOfToday) {
-      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      return formatTime12(date);
     }
     if (time >= startOfToday - 86400000) return 'Yesterday';
     if (time >= startOfToday - 6 * 86400000) {
@@ -232,6 +241,35 @@ export function LeftSidebar({
 
   const archivedCount = conversations.filter((c) => c.archivedBy?.includes(user?.uid || '')).length;
 
+  const menuItems: {
+    label: string;
+    icon: React.ElementType;
+    action: () => void | Promise<void>;
+  }[] = [
+    { label: 'New group', icon: Users, action: onOpenNewGroup },
+    { label: 'Status', icon: CircleDashed, action: onOpenStatus },
+    { label: 'Channels', icon: Radio, action: onOpenChannels },
+    { label: 'Archived chats', icon: Archive, action: () => setFilterTab('archived') },
+    { label: 'Settings', icon: Settings, action: onOpenSettings },
+  ];
+
+  if (canInstall) {
+    menuItems.push({
+      label: 'Install app',
+      icon: Download,
+      action: async () => {
+        const outcome = await promptInstall();
+        if (outcome === 'accepted') {
+          addToast({
+            title: 'Installing Chatly',
+            message: 'Chatly will open like an app from your home screen.',
+            type: 'success',
+          });
+        }
+      },
+    });
+  }
+
   const chipClass = (tab: FilterTab) =>
     `shrink-0 rounded-full px-3 py-1.5 text-[13px] font-medium transition ${
       filterTab === tab
@@ -253,6 +291,7 @@ export function LeftSidebar({
               src={profile?.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${user?.uid}`}
               alt=""
               className="h-10 w-10 rounded-full object-cover"
+              onError={(e) => onAvatarError(e, user?.uid)}
             />
             <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-[var(--wa-header)] bg-[#25d366]" />
           </button>
@@ -298,13 +337,7 @@ export function LeftSidebar({
                 className="absolute right-0 top-11 z-40 w-52 overflow-hidden rounded-lg border border-[var(--wa-border)] bg-[var(--wa-panel)] py-1.5 shadow-xl animate-scale-in"
                 onClick={(e) => e.stopPropagation()}
               >
-                {[
-                  { label: 'New group', icon: Users, action: onOpenNewGroup },
-                  { label: 'Status', icon: CircleDashed, action: onOpenStatus },
-                  { label: 'Channels', icon: Radio, action: onOpenChannels },
-                  { label: 'Archived chats', icon: Archive, action: () => setFilterTab('archived') },
-                  { label: 'Settings', icon: Settings, action: onOpenSettings },
-                ].map((item) => (
+                {menuItems.map((item) => (
                   <button
                     key={item.label}
                     onClick={() => {
@@ -380,10 +413,12 @@ export function LeftSidebar({
             const other = otherId ? conv.participantDetails?.[otherId] : null;
             const isSelected = activeConversationId === conv.id;
 
-            const name = isGroup ? conv.groupInfo?.name || 'Group' : other?.displayName || 'Chat';
+            const name = isGroup
+              ? conv.groupInfo?.name || 'Group'
+              : displayNameFor(otherId, other?.displayName || 'Chat');
             const photo = isGroup
               ? conv.groupInfo?.photoURL || `https://api.dicebear.com/7.x/identicon/svg?seed=${conv.id}`
-              : other?.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${otherId}`;
+              : photoFor(otherId, other?.photoURL);
 
             const last = conv.lastMessage;
             const mine = last?.senderId === user?.uid;
@@ -416,6 +451,7 @@ export function LeftSidebar({
                     src={photo}
                     alt=""
                     className="h-[49px] w-[49px] rounded-full object-cover"
+                    onError={(e) => onAvatarError(e, isGroup ? conv.id : otherId, isGroup ? 'identicon' : 'bottts')}
                   />
                   {!isGroup && other?.isOnline && (
                     <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-[var(--wa-panel)] bg-[#25d366]" />
@@ -447,7 +483,9 @@ export function LeftSidebar({
                       )}
                       {isGroup && last && !mine && (
                         <span className="shrink-0 text-[var(--wa-text-2)]">
-                          {last.senderName ? `${last.senderName}: ` : ''}
+                          {last.senderId
+                            ? `${displayNameFor(last.senderId, last.senderName || '')}: `
+                            : ''}
                         </span>
                       )}
                       <span className="truncate">

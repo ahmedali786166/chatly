@@ -14,10 +14,15 @@ import {
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase/config';
 import { useAuth } from '../context/AuthContext';
+import { useDirectory } from '../context/DirectoryContext';
 import { useCall } from '../context/CallContext';
 import { useNotification } from '../context/NotificationContext';
-import { Conversation, Message, MediaType, UserProfile } from '../types';
+import { Conversation, Message, MediaType } from '../types';
 import { MessageItem } from './MessageItem';
+import { ProfilePhotoViewer } from './ProfilePhotoViewer';
+import { ContactDialog } from './ContactDialog';
+import { formatTime12, startOfToday, isSameDay, toDate } from '../lib/time';
+import { onAvatarError } from '../lib/avatar';
 import { uploadFile } from '../services/storage';
 import { sounds } from '../services/sound';
 import {
@@ -37,6 +42,7 @@ import {
   ArrowLeft,
   Lock,
   Trash2,
+  UserPlus,
 } from 'lucide-react';
 
 interface ChatPanelProps {
@@ -52,32 +58,28 @@ const EMOJI_LIST = [
   '✨', '🌟', '🚀', '💡', '👀', '🎁', '☀️', '🌙', '☕', '⚽',
 ];
 
-const sameDay = (a: Date, b: Date) =>
-  a.getFullYear() === b.getFullYear() &&
-  a.getMonth() === b.getMonth() &&
-  a.getDate() === b.getDate();
+const sameDay = (a: Date, b: Date) => isSameDay(a, b);
 
-const formatDayLabel = (iso: string) => {
-  const date = new Date(iso);
+const formatDayLabel = (value: unknown) => {
+  const date = toDate(value);
+  if (!date) return '';
   const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const dayStart = startOfToday(now);
   const time = date.getTime();
-  if (sameDay(date, now)) return 'Today';
-  if (time >= startOfToday - 86400000) return 'Yesterday';
-  return date.toLocaleDateString([], { day: 'numeric', month: 'long', year: 'numeric' });
+  if (isSameDay(date, now)) return 'Today';
+  if (time >= dayStart - 86400000) return 'Yesterday';
+  return date.toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
 };
 
-const formatLastSeen = (iso?: string) => {
-  if (!iso) return 'offline';
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return 'offline';
-  const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+const formatLastSeen = (value?: unknown) => {
+  const date = toDate(value);
+  if (!date) return 'offline';
+  const dayStart = startOfToday();
   const time = date.getTime();
-  if (time >= startOfToday - 86400000) {
-    return `last seen ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  if (time >= dayStart - 86400000) {
+    return `last seen ${formatTime12(date)}`;
   }
-  return `last seen ${date.toLocaleDateString([], { day: 'numeric', month: 'short' })}`;
+  return `last seen ${date.toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}`;
 };
 
 export function ChatPanel({
@@ -89,6 +91,15 @@ export function ChatPanel({
   const { user, profile } = useAuth();
   const { startCall } = useCall();
   const { addToast } = useNotification();
+  const {
+    directory,
+    displayNameFor,
+    photoFor,
+    isSavedContact,
+    saveContactFor,
+    removeContactFor,
+    nicknameFor,
+  } = useDirectory();
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [text, setText] = useState('');
@@ -100,7 +111,8 @@ export function ChatPanel({
   const [showSearchBar, setShowSearchBar] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
-  const [otherUser, setOtherUser] = useState<UserProfile | null>(null);
+  const [showPhoto, setShowPhoto] = useState(false);
+  const [showContactDialog, setShowContactDialog] = useState(false);
 
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
@@ -120,24 +132,17 @@ export function ChatPanel({
   const isGroup = conversation.type === 'group';
   const otherUserId = conversation.participantIds.find((id) => id !== user?.uid);
   const otherDetail = otherUserId ? conversation.participantDetails?.[otherUserId] : null;
+  const otherUser = otherUserId ? directory[otherUserId] : undefined;
+  const otherName = displayNameFor(otherUserId, otherDetail?.displayName || 'Contact');
+  const otherPhoto = photoFor(otherUserId, otherDetail?.photoURL);
   const isBlocked = !!otherUserId && !!profile?.blockedUsers?.includes(otherUserId);
 
   const typingUsers = Object.entries(conversation.typingUsers || {})
     .filter(([uid, active]) => active && uid !== user?.uid)
-    .map(([uid]) => conversation.participantDetails?.[uid]?.displayName || 'Someone');
+    .map(([uid]) =>
+      displayNameFor(uid, conversation.participantDetails?.[uid]?.displayName || 'Someone')
+    );
   const isOtherTyping = typingUsers.length > 0;
-
-  // Live presence for direct chats
-  useEffect(() => {
-    if (!otherUserId || isGroup) {
-      setOtherUser(null);
-      return;
-    }
-    const unsubscribe = onSnapshot(doc(db, 'users', otherUserId), (snap) => {
-      if (snap.exists()) setOtherUser(snap.data() as UserProfile);
-    });
-    return () => unsubscribe();
-  }, [otherUserId, isGroup]);
 
   // Messages stream
   useEffect(() => {
@@ -634,30 +639,31 @@ export function ChatPanel({
             </button>
           )}
 
-          <button onClick={onToggleRightSidebar} className="flex min-w-0 items-center gap-3 text-left">
-            <div className="relative shrink-0">
+          <div className="flex min-w-0 items-center gap-3">
+            <button
+              onClick={() => (isGroup ? onToggleRightSidebar() : setShowPhoto(true))}
+              className="relative shrink-0 rounded-full transition hover:opacity-90"
+              title="View profile photo"
+            >
               <img
                 src={
                   isGroup
                     ? conversation.groupInfo?.photoURL ||
                       `https://api.dicebear.com/7.x/identicon/svg?seed=${conversation.id}`
-                    : otherUser?.photoURL ||
-                      otherDetail?.photoURL ||
-                      `https://api.dicebear.com/7.x/bottts/svg?seed=${otherUserId}`
+                    : otherPhoto || `https://api.dicebear.com/7.x/bottts/svg?seed=${otherUserId}`
                 }
                 alt=""
                 className="h-10 w-10 rounded-full object-cover"
+                onError={(e) => onAvatarError(e, otherUserId)}
               />
               {!isGroup && (otherUser?.isOnline ?? otherDetail?.isOnline) && (
                 <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-[var(--wa-header)] bg-[#25d366]" />
               )}
-            </div>
+            </button>
 
-            <div className="min-w-0">
+            <button onClick={onToggleRightSidebar} className="min-w-0 text-left">
               <h2 className="truncate text-[16px] font-medium leading-tight text-[var(--wa-text)]">
-                {isGroup
-                  ? conversation.groupInfo?.name || 'Group'
-                  : otherUser?.displayName || otherDetail?.displayName || 'Contact'}
+                {isGroup ? conversation.groupInfo?.name || 'Group' : otherName}
               </h2>
               <p
                 className={`truncate text-[12.5px] ${
@@ -666,37 +672,32 @@ export function ChatPanel({
               >
                 {statusText}
               </p>
-            </div>
-          </button>
+            </button>
+          </div>
         </div>
 
-        <div className="flex items-center gap-0.5">
+        <div className="flex shrink-0 items-center gap-0.5">
           {!isGroup && otherUserId && (
             <>
+              {!isSavedContact(otherUserId) && (
+                <button
+                  onClick={() => setShowContactDialog(true)}
+                  className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-full text-[var(--wa-text-2)] transition hover:bg-black/5 min-[400px]:flex dark:hover:bg-white/5"
+                  title="Add to contacts"
+                >
+                  <UserPlus className="h-5 w-5" />
+                </button>
+              )}
               <button
-                onClick={() =>
-                  startCall(
-                    otherUserId,
-                    otherUser?.displayName || otherDetail?.displayName || 'Contact',
-                    otherUser?.photoURL || otherDetail?.photoURL,
-                    'video'
-                  )
-                }
-                className="flex h-10 w-10 items-center justify-center rounded-full text-[var(--wa-text-2)] transition hover:bg-black/5 dark:hover:bg-white/5"
+                onClick={() => startCall(otherUserId, otherName, otherPhoto, 'video')}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[var(--wa-text-2)] transition hover:bg-black/5 dark:hover:bg-white/5"
                 title="Video call"
               >
                 <Video className="h-5 w-5" />
               </button>
               <button
-                onClick={() =>
-                  startCall(
-                    otherUserId,
-                    otherUser?.displayName || otherDetail?.displayName || 'Contact',
-                    otherUser?.photoURL || otherDetail?.photoURL,
-                    'audio'
-                  )
-                }
-                className="flex h-10 w-10 items-center justify-center rounded-full text-[var(--wa-text-2)] transition hover:bg-black/5 dark:hover:bg-white/5"
+                onClick={() => startCall(otherUserId, otherName, otherPhoto, 'audio')}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[var(--wa-text-2)] transition hover:bg-black/5 dark:hover:bg-white/5"
                 title="Voice call"
               >
                 <Phone className="h-5 w-5" />
@@ -706,7 +707,7 @@ export function ChatPanel({
 
           <button
             onClick={() => setShowSearchBar((v) => !v)}
-            className={`flex h-10 w-10 items-center justify-center rounded-full transition hover:bg-black/5 dark:hover:bg-white/5 ${
+            className={`hidden h-10 w-10 shrink-0 items-center justify-center rounded-full transition hover:bg-black/5 min-[400px]:flex dark:hover:bg-white/5 ${
               showSearchBar ? 'text-[#00a884]' : 'text-[var(--wa-text-2)]'
             }`}
             title="Search in chat"
@@ -716,7 +717,7 @@ export function ChatPanel({
 
           <button
             onClick={onToggleRightSidebar}
-            className={`flex h-10 w-10 items-center justify-center rounded-full transition hover:bg-black/5 dark:hover:bg-white/5 ${
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition hover:bg-black/5 dark:hover:bg-white/5 ${
               isRightSidebarOpen ? 'text-[#00a884]' : 'text-[var(--wa-text-2)]'
             }`}
             title="Chat info"
@@ -758,7 +759,7 @@ export function ChatPanel({
       <div
         ref={scrollContainerRef}
         onScroll={handleScroll}
-        className={`${wallpaperClass} flex-1 overflow-y-auto px-3 py-4 md:px-8 lg:px-14`}
+        className={`${wallpaperClass} min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2.5 py-4 sm:px-4 md:px-8 lg:px-14`}
       >
         {filteredMessages.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center text-center">
@@ -836,7 +837,9 @@ export function ChatPanel({
             <div className="h-9 w-1 rounded-full bg-[#00a884]" />
             <div className="min-w-0">
               <p className="text-[12.5px] font-semibold text-[#00a884]">
-                {editingMessage ? 'Edit message' : `Reply to ${replyingTo?.senderName}`}
+                {editingMessage
+                  ? 'Edit message'
+                  : `Reply to ${displayNameFor(replyingTo?.senderId, replyingTo?.senderName || 'Contact')}`}
               </p>
               <p className="truncate text-[12.5px] text-[var(--wa-text-2)]">
                 {editingMessage ? editingMessage.text : replyingTo?.text || 'Attachment'}
@@ -883,7 +886,7 @@ export function ChatPanel({
       )}
 
       {/* Composer */}
-      <div className="relative z-20 shrink-0 border-t border-[var(--wa-border)] bg-[var(--wa-header)] px-2 py-2 md:px-4 md:py-2.5">
+      <div className="composer-safe relative z-20 shrink-0 border-t border-[var(--wa-border)] bg-[var(--wa-header)] px-2 py-2 md:px-4 md:py-2.5">
         {showEmojiPicker && (
           <div className="absolute bottom-full left-3 mb-2 z-40 w-[292px] rounded-xl border border-[var(--wa-border)] bg-[var(--wa-panel)] p-2 shadow-2xl animate-scale-in">
             <div className="grid grid-cols-8 gap-0.5">
@@ -1028,6 +1031,45 @@ export function ChatPanel({
           </form>
         )}
       </div>
+
+      {showPhoto && !isGroup && otherUserId && (
+        <ProfilePhotoViewer
+          src={otherPhoto || `https://api.dicebear.com/7.x/bottts/svg?seed=${otherUserId}`}
+          name={otherName}
+          onClose={() => setShowPhoto(false)}
+        />
+      )}
+
+      {showContactDialog && otherUserId && (
+        <ContactDialog
+          personName={otherUser?.displayName || otherDetail?.displayName || 'Contact'}
+          initialNickname={nicknameFor(otherUserId) || ''}
+          isSaved={isSavedContact(otherUserId)}
+          onSave={async (nickname) => {
+            try {
+              await saveContactFor(otherUserId, nickname);
+              setShowContactDialog(false);
+              addToast({
+                title: 'Contact saved',
+                message: nickname ? `Saved as “${nickname}”.` : 'Added to your contacts.',
+                type: 'success',
+              });
+            } catch {
+              addToast({ title: 'Could not save contact', message: 'Please try again.', type: 'error' });
+            }
+          }}
+          onRemove={async () => {
+            try {
+              await removeContactFor(otherUserId);
+              setShowContactDialog(false);
+              addToast({ title: 'Contact removed', message: 'Removed from your contacts.', type: 'success' });
+            } catch {
+              addToast({ title: 'Could not remove contact', message: 'Please try again.', type: 'error' });
+            }
+          }}
+          onClose={() => setShowContactDialog(false)}
+        />
+      )}
     </div>
   );
 }

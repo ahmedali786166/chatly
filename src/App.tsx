@@ -5,6 +5,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { DirectoryProvider } from './context/DirectoryContext';
 import { NotificationProvider, useNotification } from './context/NotificationContext';
 import { CallProvider } from './context/CallContext';
 import { LeftSidebar } from './components/LeftSidebar';
@@ -242,7 +243,7 @@ function MainApp() {
     : 'chats';
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-[var(--wa-bg)] text-[var(--wa-text)]">
+    <div className="flex h-[100dvh] w-screen overflow-hidden bg-[var(--wa-bg)] text-[var(--wa-text)]">
       <NavRail
         active={railActive}
         onChats={() => {
@@ -410,11 +411,13 @@ function MainApp() {
 export default function App() {
   return (
     <AuthProvider>
-      <NotificationProvider>
-        <CallProvider>
-          <MainApp />
-        </CallProvider>
-      </NotificationProvider>
+      <DirectoryProvider>
+        <NotificationProvider>
+          <CallProvider>
+            <MainApp />
+          </CallProvider>
+        </NotificationProvider>
+      </DirectoryProvider>
     </AuthProvider>
   );
 }

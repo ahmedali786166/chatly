@@ -6,10 +6,13 @@ import {
   deleteDoc,
   doc,
   getDocs,
+  query,
   updateDoc,
+  where,
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase/config';
 import { useAuth } from '../context/AuthContext';
+import { useDirectory } from '../context/DirectoryContext';
 import { useNotification } from '../context/NotificationContext';
 import { StatusStory } from '../types';
 import {
@@ -25,7 +28,31 @@ import {
   Trash2,
   Camera,
 } from 'lucide-react';
-import { uploadFile } from '../services/storage';
+import { deleteCloudinaryMedia, uploadFileDetailed } from '../services/storage';
+import { formatTime12 } from '../lib/time';
+
+const STATUS_TTL_MS = 24 * 60 * 60 * 1000;
+const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
+
+const expiryMs = (story: StatusStory) =>
+  typeof story.expiresAtMs === 'number'
+    ? story.expiresAtMs
+    : new Date(story.expiresAt).getTime();
+
+const isExpired = (story: StatusStory) => {
+  const ms = expiryMs(story);
+  return Number.isFinite(ms) && ms <= Date.now();
+};
+
+/** Deletes an expired story document and its Cloudinary media, best-effort. */
+async function cleanupStory(story: StatusStory) {
+  try {
+    if (story.deleteToken) await deleteCloudinaryMedia(story.deleteToken);
+    await deleteDoc(doc(db, 'statuses', story.id));
+  } catch {
+    // Rules may reject deleting someone else's story; it stays hidden client-side.
+  }
+}
 
 interface StatusModalProps {
   onClose: () => void;
@@ -43,6 +70,7 @@ const BG_GRADIENTS = [
 
 export function StatusModal({ onClose, onReplyToStatus }: StatusModalProps) {
   const { user, profile } = useAuth();
+  const { contacts, displayNameFor, photoFor } = useDirectory();
   const { addToast } = useNotification();
 
   const [statuses, setStatuses] = useState<StatusStory[]>([]);
@@ -56,27 +84,62 @@ export function StatusModal({ onClose, onReplyToStatus }: StatusModalProps) {
   const [loading, setLoading] = useState(false);
   const [replyText, setReplyText] = useState('');
 
+  const contactUids = useMemo(() => Object.keys(contacts), [contacts]);
+
+  // Load our own statuses plus statuses from people we saved as contacts.
+  // Firestore rules enforce the same boundary (a viewer must have saved the
+  // creator), so those are the only documents the queries can return.
   useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+
     const fetchStatuses = async () => {
       try {
-        const snap = await getDocs(collection(db, 'statuses'));
-        const list: StatusStory[] = [];
-        const now = new Date().toISOString();
+        const queries = [
+          query(collection(db, 'statuses'), where('userId', '==', user.uid)),
+          ...contactUids.map((contactUid) =>
+            query(collection(db, 'statuses'), where('userId', '==', contactUid))
+          ),
+        ];
 
-        snap.forEach((d) => {
-          const story = { id: d.id, ...d.data() } as StatusStory;
-          if (!story.expiresAt || story.expiresAt > now) list.push(story);
+        const snapshots = await Promise.all(
+          queries.map((q) => getDocs(q).catch(() => null))
+        );
+
+        const byId = new Map<string, StatusStory>();
+        snapshots.forEach((snap) => {
+          snap?.forEach((d) =>
+            byId.set(d.id, { id: d.id, ...d.data() } as StatusStory)
+          );
         });
 
-        list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        setStatuses(list);
+        const all = Array.from(byId.values());
+        const expired = all.filter(isExpired);
+        expired.forEach((story) => {
+          void cleanupStory(story);
+        });
+
+        const active = all
+          .filter((story) => !isExpired(story))
+          .sort(
+            (a, b) =>
+              new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+          );
+
+        if (!cancelled) setStatuses(active);
       } catch (err) {
         handleFirestoreError(err, OperationType.LIST, 'statuses');
       }
     };
 
     fetchStatuses();
-  }, []);
+    const timer = window.setInterval(fetchStatuses, CLEANUP_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [user, contactUids]);
+
 
   useEffect(() => {
     if (activeStoryIndex !== null && user && statuses[activeStoryIndex]) {
@@ -123,6 +186,7 @@ export function StatusModal({ onClose, onReplyToStatus }: StatusModalProps) {
 
     try {
       const now = new Date();
+      const expiresAtMs = now.getTime() + STATUS_TTL_MS;
       const newStory: Omit<StatusStory, 'id'> = {
         userId: user.uid,
         userName: profile.displayName,
@@ -132,7 +196,8 @@ export function StatusModal({ onClose, onReplyToStatus }: StatusModalProps) {
         backgroundColor: selectedGradient,
         viewers: [],
         createdAt: now.toISOString(),
-        expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString(),
+        expiresAt: new Date(expiresAtMs).toISOString(),
+        expiresAtMs,
       };
 
       const docRef = await addDoc(collection(db, 'statuses'), newStory);
@@ -154,20 +219,27 @@ export function StatusModal({ onClose, onReplyToStatus }: StatusModalProps) {
     setLoading(true);
 
     try {
-      const mediaUrl = await uploadFile(mediaFile, `statuses/${Date.now()}_${mediaFile.name.replace(/[^\w.\-]+/g, '_')}`);
+      const upload = await uploadFileDetailed(
+        mediaFile,
+        `statuses/${Date.now()}_${mediaFile.name.replace(/[^\w.\-]+/g, '_')}`
+      );
       const isVideo = mediaFile.type.startsWith('video');
       const now = new Date();
+      const expiresAtMs = now.getTime() + STATUS_TTL_MS;
 
       const newStory: Omit<StatusStory, 'id'> = {
         userId: user.uid,
         userName: profile.displayName,
         userPhoto: profile.photoURL,
         type: isVideo ? 'video' : 'image',
-        content: mediaUrl,
+        content: upload.url,
         ...(caption.trim() ? { caption: caption.trim() } : {}),
+        ...(upload.publicId ? { publicId: upload.publicId } : {}),
+        ...(upload.deleteToken ? { deleteToken: upload.deleteToken } : {}),
         viewers: [],
         createdAt: now.toISOString(),
-        expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString(),
+        expiresAt: new Date(expiresAtMs).toISOString(),
+        expiresAtMs,
       };
 
       const docRef = await addDoc(collection(db, 'statuses'), newStory);
@@ -193,6 +265,7 @@ export function StatusModal({ onClose, onReplyToStatus }: StatusModalProps) {
   const handleDeleteStatus = async (story: StatusStory) => {
     if (!user || story.userId !== user.uid) return;
     try {
+      if (story.deleteToken) await deleteCloudinaryMedia(story.deleteToken);
       await deleteDoc(doc(db, 'statuses', story.id));
       setStatuses((prev) => prev.filter((s) => s.id !== story.id));
       setActiveStoryIndex(null);
@@ -215,6 +288,8 @@ export function StatusModal({ onClose, onReplyToStatus }: StatusModalProps) {
   if (activeStoryIndex !== null && statuses[activeStoryIndex]) {
     const current = statuses[activeStoryIndex];
     const isMine = current.userId === user?.uid;
+    const authorName = isMine ? 'My status' : displayNameFor(current.userId, current.userName);
+    const authorPhoto = photoFor(current.userId, current.userPhoto);
 
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black p-0 sm:p-4">
@@ -238,16 +313,16 @@ export function StatusModal({ onClose, onReplyToStatus }: StatusModalProps) {
           <div className="absolute inset-x-4 top-7 z-30 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <img
-                src={current.userPhoto || `https://api.dicebear.com/7.x/bottts/svg?seed=${current.userId}`}
+                src={authorPhoto}
                 alt=""
                 className="h-10 w-10 rounded-full object-cover"
               />
               <div>
                 <h4 className="text-[14px] font-semibold text-white drop-shadow">
-                  {isMine ? 'My status' : current.userName}
+                  {authorName}
                 </h4>
                 <p className="text-[11px] text-white/75">
-                  {new Date(current.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  {formatTime12(current.createdAt)}
                 </p>
               </div>
             </div>
@@ -328,7 +403,7 @@ export function StatusModal({ onClose, onReplyToStatus }: StatusModalProps) {
                   value={replyText}
                   onChange={(e) => setReplyText(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleSendReply()}
-                  placeholder={`Reply to ${current.userName}`}
+                  placeholder={`Reply to ${displayNameFor(current.userId, current.userName)}`}
                   className="h-11 flex-1 rounded-full border border-white/20 bg-white/10 px-4 text-[13px] text-white placeholder:text-white/60 outline-none focus:border-white/40"
                 />
                 <button
@@ -458,20 +533,17 @@ export function StatusModal({ onClose, onReplyToStatus }: StatusModalProps) {
                         }`}
                       >
                         <img
-                          src={story.userPhoto || `https://api.dicebear.com/7.x/bottts/svg?seed=${story.userId}`}
+                          src={photoFor(story.userId, story.userPhoto)}
                           alt=""
                           className="h-[52px] w-[52px] rounded-full border-2 border-[var(--wa-panel)] object-cover"
                         />
                       </div>
                       <div className="min-w-0 flex-1">
                         <h4 className="truncate text-[14.5px] font-medium text-[var(--wa-text)]">
-                          {mine ? 'My status' : story.userName}
+                          {mine ? 'My status' : displayNameFor(story.userId, story.userName)}
                         </h4>
                         <p className="truncate text-[12px] text-[var(--wa-text-2)]">
-                          {new Date(story.createdAt).toLocaleTimeString([], {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
+                          {formatTime12(story.createdAt)}
                           {story.type === 'text' ? ' · Text' : story.type === 'video' ? ' · Video' : ' · Photo'}
                           {mine ? ` · ${story.viewers?.length || 0} views` : ''}
                         </p>
