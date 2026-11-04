@@ -24,14 +24,39 @@ interface ApiResponse {
   json: (body: unknown) => void;
 }
 
+/** Extracts the first complete JSON object so pasted trailing text is ignored. */
+function firstJsonObject(text: string) {
+  const start = text.indexOf('{');
+  if (start === -1) throw new Error('FIREBASE_SERVICE_ACCOUNT is not valid JSON');
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') inString = true;
+    else if (char === '{') depth += 1;
+    else if (char === '}') {
+      depth -= 1;
+      if (depth === 0) return text.slice(start, index + 1);
+    }
+  }
+  throw new Error('FIREBASE_SERVICE_ACCOUNT is not valid JSON');
+}
+
 function serviceAccount() {
   const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
   if (!raw) throw new Error('FIREBASE_SERVICE_ACCOUNT is not configured');
-  const json =
+  const text =
     process.env.FIREBASE_SERVICE_ACCOUNT_BASE64 === '1'
       ? Buffer.from(raw, 'base64').toString('utf8')
       : raw;
-  return JSON.parse(json) as ServiceAccount;
+  return JSON.parse(firstJsonObject(text)) as ServiceAccount;
 }
 
 function database() {
