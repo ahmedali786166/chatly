@@ -36,6 +36,10 @@ export async function deleteUserData(uid: string): Promise<void> {
   };
 
   await safely(async () => {
+    await deleteDoc(doc(db, 'users', uid));
+  });
+
+  await safely(async () => {
     const contactsSnap = await getDocs(
       query(collection(db, 'contacts'), where('ownerId', '==', uid))
     );
@@ -82,14 +86,23 @@ export async function deleteUserData(uid: string): Promise<void> {
       await deleteDoc(conversation.ref).catch(() => {});
     }
   });
+}
 
-  await safely(async () => {
-    await deleteDoc(doc(db, 'users', uid));
-  });
+type ReauthMethod = 'password' | 'google';
+
+function reauthMethodFor(user: User): ReauthMethod | null {
+  const providers = user.providerData.map((p) => p.providerId);
+
+  // Prefer the provider this session was signed in with when the account has
+  // more than one linked (for example password + Google).
+  if (user.providerId === 'google.com' && providers.includes('google.com')) return 'google';
+  if (providers.includes('password')) return 'password';
+  if (providers.includes('google.com')) return 'google';
+  return null;
 }
 
 export function usesPasswordSignIn(user: User): boolean {
-  return user.providerData.some((p) => p.providerId === 'password');
+  return reauthMethodFor(user) === 'password';
 }
 
 /**
@@ -97,13 +110,54 @@ export function usesPasswordSignIn(user: User): boolean {
  * Password users confirm with their password, Google users with a popup.
  */
 export async function reauthenticateUser(user: User, password?: string): Promise<void> {
-  if (usesPasswordSignIn(user)) {
+  const method = reauthMethodFor(user);
+
+  if (method === 'password') {
     if (!user.email) throw new Error('This account has no email address.');
     if (!password) throw new Error('Enter your password to continue.');
-    await reauthenticateWithCredential(user, EmailAuthProvider.credential(user.email, password));
+    try {
+      await reauthenticateWithCredential(
+        user,
+        EmailAuthProvider.credential(user.email, password)
+      );
+    } catch (err: unknown) {
+      const code =
+        typeof err === 'object' && err !== null && 'code' in err
+          ? String((err as { code?: string }).code)
+          : '';
+      if (code === 'auth/user-mismatch') {
+        throw new Error(
+          'That password belongs to a different account. Sign out and sign in again, then retry.'
+        );
+      }
+      throw err;
+    }
     return;
   }
-  await reauthenticateWithPopup(user, new GoogleAuthProvider());
+
+  if (method === 'google') {
+    const provider = new GoogleAuthProvider();
+    if (user.email) provider.setCustomParameters({ login_hint: user.email });
+    try {
+      await reauthenticateWithPopup(user, provider);
+    } catch (err: unknown) {
+      const code =
+        typeof err === 'object' && err !== null && 'code' in err
+          ? String((err as { code?: string }).code)
+          : '';
+      if (code === 'auth/user-mismatch') {
+        throw new Error(
+          `Choose the same Google account you signed in with${
+            user.email ? ` (${user.email})` : ''
+          } and try again.`
+        );
+      }
+      throw err;
+    }
+    return;
+  }
+
+  throw new Error('This sign-in method cannot be verified. Sign out, sign in again and retry.');
 }
 
 export async function deleteUserAccount(user: User, password?: string): Promise<void> {

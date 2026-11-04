@@ -124,7 +124,7 @@ export function AuthModal({ onClose }: AuthModalProps) {
     'w-full rounded-lg border border-[#e9edef] bg-white px-4 py-3 text-[14px] text-[#111b21] outline-none transition placeholder:text-[#8696a0] focus:border-[#00a884] focus:ring-2 focus:ring-[#00a884]/15';
 
   return (
-    <div className="min-h-screen w-screen overflow-y-auto bg-[#f0f2f5]">
+    <div className="min-h-[var(--app-height,100dvh)] w-full overflow-y-auto bg-[#f0f2f5]">
       {/* Green band */}
       <div className="h-[140px] w-full bg-[#00a884] md:h-[220px]" />
 

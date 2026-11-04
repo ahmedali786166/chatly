@@ -6,43 +6,65 @@ interface BeforeInstallPromptEvent extends Event {
 }
 
 const isStandalone = () =>
-  window.matchMedia('(display-mode: standalone)').matches ||
-  (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
+  typeof window !== 'undefined' &&
+  (window.matchMedia('(display-mode: standalone)').matches ||
+    (window.navigator as Navigator & { standalone?: boolean }).standalone === true);
+
+// One shared prompt event for every component that offers installation, so the
+// menu and the automatic banner never try to prompt twice with the same event.
+let deferredPrompt: BeforeInstallPromptEvent | null = null;
+let installed = isStandalone();
+const listeners = new Set<() => void>();
+const emit = () => listeners.forEach((listener) => listener());
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeinstallprompt', (event) => {
+    event.preventDefault();
+    deferredPrompt = event as BeforeInstallPromptEvent;
+    installed = false;
+    emit();
+  });
+
+  window.addEventListener('appinstalled', () => {
+    deferredPrompt = null;
+    installed = true;
+    emit();
+  });
+}
 
 export function usePwaInstall() {
-  const [promptEvent, setPromptEvent] = useState<BeforeInstallPromptEvent | null>(null);
-  const [isInstalled, setIsInstalled] = useState(false);
+  const [, forceRender] = useState(0);
 
   useEffect(() => {
-    setIsInstalled(isStandalone());
-
-    const handlePrompt = (event: Event) => {
-      event.preventDefault();
-      setPromptEvent(event as BeforeInstallPromptEvent);
-    };
-    const handleInstalled = () => {
-      setIsInstalled(true);
-      setPromptEvent(null);
-    };
-
-    window.addEventListener('beforeinstallprompt', handlePrompt);
-    window.addEventListener('appinstalled', handleInstalled);
+    installed = isStandalone();
+    const listener = () => forceRender((value) => value + 1);
+    listeners.add(listener);
+    forceRender((value) => value + 1);
     return () => {
-      window.removeEventListener('beforeinstallprompt', handlePrompt);
-      window.removeEventListener('appinstalled', handleInstalled);
+      listeners.delete(listener);
     };
   }, []);
 
   const promptInstall = async (): Promise<'accepted' | 'dismissed' | 'unavailable'> => {
-    if (!promptEvent) return 'unavailable';
-    await promptEvent.prompt();
-    const { outcome } = await promptEvent.userChoice;
-    if (outcome === 'accepted') {
-      setPromptEvent(null);
-      setIsInstalled(true);
+    const event = deferredPrompt;
+    if (!event) return 'unavailable';
+    // A beforeinstallprompt event can only be used once.
+    deferredPrompt = null;
+    emit();
+
+    try {
+      await event.prompt();
+      const { outcome } = await event.userChoice;
+      if (outcome === 'accepted') {
+        installed = true;
+        emit();
+      }
+      return outcome;
+    } catch {
+      // The browser can refuse the prompt (already installed, no user gesture).
+      return 'unavailable';
     }
-    return outcome;
   };
 
-  return { canInstall: !!promptEvent && !isInstalled, isInstalled, promptInstall };
+  return { canInstall: !!deferredPrompt && !installed, isInstalled: installed, promptInstall };
 }

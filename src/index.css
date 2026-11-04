@@ -61,9 +61,16 @@ html.dark {
   }
 
   html,
-  body,
-  #root {
+  body {
     height: 100%;
+    overflow: hidden;
+  }
+
+  /* The app height follows the visual viewport so the mobile keyboard never
+     pushes the chat header off-screen. */
+  #root {
+    height: var(--app-height, 100dvh);
+    overflow: hidden;
   }
 
   body {
@@ -97,6 +104,13 @@ html.dark {
 
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(134, 150, 160, 0.55);
+}
+
+/* Circular avatars must stay square even when a flex row squeezes them. */
+img.rounded-full {
+  aspect-ratio: 1 / 1;
+  flex-shrink: 0;
+  object-fit: cover;
 }
 
 /* Chat wallpaper */

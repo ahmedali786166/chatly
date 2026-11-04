@@ -90,6 +90,8 @@ export function SettingsModal({ onClose, currentTheme, setTheme }: SettingsModal
         message = 'Please log out, log back in, and try deleting again.';
       } else if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
         message = 'Google confirmation was cancelled.';
+      } else if (code === 'auth/user-mismatch') {
+        message = 'That account does not match the signed-in user. Try the same account again.';
       } else if (code === 'auth/too-many-requests') {
         message = 'Too many attempts. Please wait a few minutes and try again.';
       }

@@ -18,6 +18,7 @@ import { StatusModal } from './components/StatusModal';
 import { ChannelsModal } from './components/ChannelsModal';
 import { SettingsModal } from './components/SettingsModal';
 import { CallModal } from './components/CallModal';
+import { InstallPrompt } from './components/InstallPrompt';
 import { Conversation, Message, UserProfile } from './types';
 import { doc, getDoc, onSnapshot, collection, query, orderBy, limit } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from './firebase/config';
@@ -105,9 +106,37 @@ function NavRail({
   );
 }
 
+// Keeps the app exactly as tall as the visible viewport, so the mobile
+// keyboard shrinks the chat area instead of pushing the header off-screen.
+function useAppViewportHeight() {
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    const root = document.documentElement;
+    const update = () => {
+      const height = viewport?.height ?? window.innerHeight;
+      root.style.setProperty('--app-height', `${Math.round(height)}px`);
+      if (window.scrollY !== 0) window.scrollTo(0, 0);
+    };
+
+    update();
+    viewport?.addEventListener('resize', update);
+    viewport?.addEventListener('scroll', update);
+    window.addEventListener('resize', update);
+    window.addEventListener('orientationchange', update);
+
+    return () => {
+      viewport?.removeEventListener('resize', update);
+      viewport?.removeEventListener('scroll', update);
+      window.removeEventListener('resize', update);
+      window.removeEventListener('orientationchange', update);
+    };
+  }, []);
+}
+
 function MainApp() {
   const { user, profile, updateProfileData, loading } = useAuth();
   const { addToast } = useNotification();
+  useAppViewportHeight();
 
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
@@ -243,7 +272,7 @@ function MainApp() {
     : 'chats';
 
   return (
-    <div className="flex h-[100dvh] w-screen overflow-hidden bg-[var(--wa-bg)] text-[var(--wa-text)]">
+    <div className="flex h-[var(--app-height,100dvh)] w-full overflow-hidden bg-[var(--wa-bg)] text-[var(--wa-text)]">
       <NavRail
         active={railActive}
         onChats={() => {
@@ -415,6 +444,7 @@ export default function App() {
         <NotificationProvider>
           <CallProvider>
             <MainApp />
+            <InstallPrompt />
           </CallProvider>
         </NotificationProvider>
       </DirectoryProvider>

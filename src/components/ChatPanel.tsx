@@ -193,9 +193,11 @@ export function ChatPanel({
     }
   }, [conversation.id, conversation.unreadCounts?.[user?.uid || ''], conversation.lastMessage?.timestamp, user]);
 
-  // Auto-scroll on new messages
+  // Auto-scroll on new messages. Scroll the message pane itself so mobile
+  // browsers never scroll the whole page (which hides the chat header).
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const container = scrollContainerRef.current;
+    container?.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
   }, [messages.length]);
 
   // Reset draft / reply state when switching chats
@@ -262,7 +264,8 @@ export function ChatPanel({
   };
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const container = scrollContainerRef.current;
+    container?.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
   };
 
   const handleSendMessage = async (e?: React.FormEvent) => {

@@ -40,7 +40,7 @@ export function ProfilePhotoViewer({ src, name, onClose }: ProfilePhotoViewerPro
         <img
           src={src}
           alt={name || 'Profile photo'}
-          className="max-h-full max-w-full rounded-full object-contain shadow-2xl"
+          className="h-[min(85vw,85vh)] w-[min(85vw,85vh)] rounded-full object-cover shadow-2xl"
           onClick={(e) => e.stopPropagation()}
           onError={(e) => onAvatarError(e, name)}
         />
