@@ -318,7 +318,7 @@ export function LeftSidebar({
   }
 
   const chipClass = (tab: FilterTab) =>
-    `shrink-0 rounded-full px-2.5 py-1.5 text-[12.5px] font-medium transition ${
+    `shrink-0 rounded-full px-2 py-1.5 text-[12px] font-medium transition ${
       filterTab === tab
         ? 'bg-[#d9fdd3] text-[#008069] dark:bg-[#103529] dark:text-[#06cf9c]'
         : 'bg-[var(--wa-panel-2)] text-[var(--wa-text-2)] hover:bg-[var(--wa-hover)]'

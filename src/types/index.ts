@@ -83,6 +83,7 @@ export interface Message {
   mediaType?: MediaType;
   fileName?: string;
   fileSize?: number;
+  duration?: number;
   replyTo?: {
     id: string;
     senderName: string;

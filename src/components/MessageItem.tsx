@@ -18,7 +18,7 @@ import {
   Play,
   Pause,
   Smile,
-  Clock,
+  Mic,
 } from 'lucide-react';
 
 interface MessageItemProps {
@@ -138,6 +138,7 @@ export function MessageItem({
   const othersRead = message.readBy?.some((id) => id !== user?.uid);
   const othersDelivered = message.deliveredTo?.some((id) => id !== user?.uid);
   const isVoice = message.mediaType === 'voice' || message.mediaType === 'audio';
+  const totalDuration = audioDuration || message.duration || 0;
 
   const toggleAudio = () => {
     if (!message.mediaUrl) return;
@@ -161,11 +162,11 @@ export function MessageItem({
   };
 
   const seekAudio = (event: React.MouseEvent<HTMLDivElement>) => {
-    if (!audioRef.current || audioDuration <= 0) return;
+    if (!audioRef.current || totalDuration <= 0) return;
     const rect = event.currentTarget.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
-    audioRef.current.currentTime = ratio * audioDuration;
-    setAudioProgress(ratio * audioDuration);
+    audioRef.current.currentTime = ratio * totalDuration;
+    setAudioProgress(ratio * totalDuration);
   };
 
   const copyToClipboard = () => {
@@ -276,8 +277,8 @@ export function MessageItem({
     ([, users]) => users && users.length > 0
   );
 
-  const playedRatio =
-    audioDuration > 0 ? Math.min(1, Math.max(0, audioProgress / audioDuration)) : 0;
+  const playRatio =
+    totalDuration > 0 ? Math.min(1, Math.max(0, audioProgress / totalDuration)) : 0;
 
   return (
     <div
@@ -403,11 +404,11 @@ export function MessageItem({
                         aria-label="Voice message progress"
                         aria-valuemin={0}
                         aria-valuemax={100}
-                        aria-valuenow={Math.round(playedRatio * 100)}
+                        aria-valuenow={Math.round(playRatio * 100)}
                         tabIndex={0}
                       >
                         {bars.map((height, index) => {
-                          const played = index / WAVE_BARS <= playedRatio;
+                          const played = index / WAVE_BARS <= playRatio;
                           return (
                             <span
                               key={index}
@@ -419,12 +420,14 @@ export function MessageItem({
                           );
                         })}
                       </div>
-                      <div className="mt-0.5 flex items-center justify-between text-[10.5px] leading-none text-[var(--wa-text-2)]">
+                      <div className="mt-0.5 flex items-center justify-between pr-3 text-[10.5px] leading-none text-[var(--wa-text-2)]">
                         <span className="flex items-center gap-1">
-                          <Clock className="h-2.5 w-2.5" />
-                          {playing ? formatDuration(audioProgress) : formatDuration(audioDuration)}
+                          <Mic className="h-2.5 w-2.5" />
+                          {playing ? 'Playing' : 'Voice'}
                         </span>
-                        <span>{playing ? 'Playing' : 'Voice message'}</span>
+                        <span className="tabular-nums">
+                          {formatDuration(playing ? audioProgress : totalDuration)}
+                        </span>
                       </div>
                     </div>
                   </div>

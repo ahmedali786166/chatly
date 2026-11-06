@@ -710,6 +710,7 @@ export function ChatPanel({
             mediaType: 'voice',
             fileName: `voice-note-${seconds}s.webm`,
             fileSize: audioBlob.size,
+            duration: seconds,
             readBy: [user.uid],
             deliveredTo: [user.uid],
             createdAt: now,
