@@ -224,7 +224,11 @@ export function MessageItem({
     }
 
     if (press.axis === 'x') {
-      event.currentTarget.setPointerCapture?.(event.pointerId);
+      try {
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+      } catch {
+        // Synthetic/ended pointers cannot be captured; swiping still works.
+      }
       if (dx > 0) {
         const next = Math.min(SWIPE_MAX, dx * 0.65);
         swipeXRef.current = next;
@@ -252,8 +256,12 @@ export function MessageItem({
     setSwipeX(0);
     setDragging(false);
     pressRef.current = null;
-    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
+    try {
+      if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+    } catch {
+      // Pointer already released.
     }
   };
 

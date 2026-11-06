@@ -318,7 +318,7 @@ export function LeftSidebar({
   }
 
   const chipClass = (tab: FilterTab) =>
-    `shrink-0 rounded-full px-3 py-1.5 text-[13px] font-medium transition ${
+    `shrink-0 rounded-full px-2.5 py-1.5 text-[12.5px] font-medium transition ${
       filterTab === tab
         ? 'bg-[#d9fdd3] text-[#008069] dark:bg-[#103529] dark:text-[#06cf9c]'
         : 'bg-[var(--wa-panel-2)] text-[var(--wa-text-2)] hover:bg-[var(--wa-hover)]'
@@ -422,7 +422,7 @@ export function LeftSidebar({
       </div>
 
       {/* Filter chips */}
-      <div className="flex shrink-0 items-center gap-2 overflow-x-auto px-3 pb-2 no-scrollbar">
+      <div className="flex shrink-0 items-center gap-1.5 overflow-x-auto px-2.5 pb-2 no-scrollbar">
         <button className={chipClass('all')} onClick={() => setFilterTab('all')}>
           All
         </button>
