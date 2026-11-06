@@ -181,7 +181,7 @@ export function MessageItem({
       x: Math.max(8, Math.min(x, window.innerWidth - width - 8)),
       y: Math.max(8, Math.min(y - 24, window.innerHeight - height - 8)),
     });
-    if (navigator.vibrate) navigator.vibrate(12);
+    if (navigator.vibrate && navigator.userActivation?.isActive) navigator.vibrate(12);
   };
 
   const clearHold = () => {

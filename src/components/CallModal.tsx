@@ -48,7 +48,7 @@ export function CallModal() {
       .play()
       .then(() => setAudioBlocked(false))
       .catch(() => setAudioBlocked(true));
-  }, [remoteStream]);
+  }, [remoteStream, activeCall]);
 
   const unlockAudio = () => {
     remoteAudioRef.current
@@ -137,7 +137,12 @@ export function CallModal() {
           if (audioBlocked) unlockAudio();
         }}
       >
-        <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
+        <audio
+          ref={remoteAudioRef}
+          autoPlay
+          playsInline
+          className="pointer-events-none absolute h-px w-px opacity-0"
+        />
 
         {/* Header */}
         <div className="relative z-20 flex items-center gap-3 px-4 py-4 sm:px-6">
