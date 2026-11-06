@@ -9,6 +9,7 @@ interface DirectoryContextType {
   directory: Record<string, UserProfile>;
   contacts: Record<string, Contact>;
   contactCount: number;
+  contactsLoaded: boolean;
   isSavedContact: (uid?: string | null) => boolean;
   nicknameFor: (uid?: string | null) => string | undefined;
   displayNameFor: (uid?: string | null, fallback?: string) => string;
@@ -26,6 +27,7 @@ export function DirectoryProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const [directory, setDirectory] = useState<Record<string, UserProfile>>({});
   const [contactList, setContactList] = useState<Contact[]>([]);
+  const [contactsLoaded, setContactsLoaded] = useState(false);
 
   useEffect(() => {
     if (!user) {
@@ -50,9 +52,13 @@ export function DirectoryProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!user) {
       setContactList([]);
+      setContactsLoaded(false);
       return;
     }
-    return subscribeContacts(user.uid, setContactList);
+    return subscribeContacts(user.uid, (list) => {
+      setContactList(list);
+      setContactsLoaded(true);
+    });
   }, [user]);
 
   const contacts = useMemo(() => {
@@ -78,6 +84,7 @@ export function DirectoryProvider({ children }: { children: React.ReactNode }) {
     directory,
     contacts,
     contactCount: contactList.length,
+    contactsLoaded,
     isSavedContact,
     nicknameFor,
     displayNameFor,

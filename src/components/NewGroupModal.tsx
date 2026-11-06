@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, doc, getDocs, limit, query, setDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, setDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase/config';
 import { useAuth } from '../context/AuthContext';
+import { useDirectory } from '../context/DirectoryContext';
 import { useNotification } from '../context/NotificationContext';
 import { UserProfile, Conversation } from '../types';
 import { uploadFile } from '../services/storage';
@@ -24,40 +25,73 @@ interface NewGroupModalProps {
 export function NewGroupModal({ onClose, onSelectConversation }: NewGroupModalProps) {
   const { user, profile } = useAuth();
   const { addToast } = useNotification();
+  const { contacts, directory, contactsLoaded } = useDirectory();
 
   const [step, setStep] = useState<1 | 2>(1);
-  const [availableUsers, setAvailableUsers] = useState<UserProfile[]>([]);
+  const [extraProfiles, setExtraProfiles] = useState<Record<string, UserProfile>>({});
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [groupName, setGroupName] = useState('');
   const [description, setDescription] = useState('');
   const [groupPhoto, setGroupPhoto] = useState('');
-  const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
+  // Groups can only contain saved contacts, never the whole user directory.
+  // Most profiles come from the directory cache; fetch any contact that is
+  // missing from it (e.g. beyond the directory page size).
   useEffect(() => {
-    const fetchUsers = async () => {
-      if (!user) return;
-      try {
-        const snap = await getDocs(query(collection(db, 'users'), limit(100)));
-        const list: UserProfile[] = [];
-        snap.forEach((d) => {
-          const data = d.data() as UserProfile;
-          if (data.uid !== user.uid && !profile?.blockedUsers?.includes(data.uid)) {
-            list.push(data);
+    if (!user) return;
+    const missing = Object.values(contacts)
+      .map((c) => c.contactUid)
+      .filter(
+        (uid): uid is string =>
+          Boolean(uid) && uid !== user.uid && !directory[uid] && !extraProfiles[uid]
+      );
+    if (missing.length === 0) return;
+
+    let cancelled = false;
+    (async () => {
+      const loaded: Record<string, UserProfile> = {};
+      await Promise.all(
+        missing.map(async (uid) => {
+          try {
+            const snap = await getDoc(doc(db, 'users', uid));
+            if (snap.exists()) {
+              const data = snap.data() as UserProfile;
+              loaded[uid] = { ...data, uid: data.uid || uid };
+            }
+          } catch {
+            // Missing profiles are simply left out.
           }
-        });
-        list.sort((a, b) => (a.displayName || '').localeCompare(b.displayName || ''));
-        setAvailableUsers(list);
-      } catch (err) {
-        handleFirestoreError(err, OperationType.LIST, 'users');
-      } finally {
-        setLoading(false);
+        })
+      );
+      if (!cancelled && Object.keys(loaded).length > 0) {
+        setExtraProfiles((prev) => ({ ...prev, ...loaded }));
       }
+    })();
+
+    return () => {
+      cancelled = true;
     };
-    fetchUsers();
-  }, [user, profile?.blockedUsers]);
+  }, [contacts, directory, extraProfiles, user]);
+
+  const availableUsers = useMemo(() => {
+    if (!user) return [];
+    const list: UserProfile[] = [];
+    Object.values(contacts).forEach((contact) => {
+      const uid = contact.contactUid;
+      if (!uid || uid === user.uid) return;
+      if (profile?.blockedUsers?.includes(uid)) return;
+      const data = directory[uid] || extraProfiles[uid];
+      if (!data) return;
+      list.push({ ...data, uid, displayName: contact.nickname || data.displayName });
+    });
+    list.sort((a, b) => (a.displayName || '').localeCompare(b.displayName || ''));
+    return list;
+  }, [contacts, directory, extraProfiles, user, profile?.blockedUsers]);
+
+  const loading = !contactsLoaded;
 
   const filteredUsers = useMemo(() => {
     const q = searchTerm.toLowerCase().trim();
@@ -243,8 +277,14 @@ export function NewGroupModal({ onClose, onSelectConversation }: NewGroupModalPr
               ) : filteredUsers.length === 0 ? (
                 <div className="flex flex-col items-center justify-center gap-2 px-8 py-16 text-center">
                   <Users className="h-8 w-8 text-[var(--wa-text-3)]" />
-                  <p className="text-sm font-medium text-[var(--wa-text)]">No contacts found</p>
-                  <p className="text-xs text-[var(--wa-text-2)]">Try a different search term.</p>
+                  <p className="text-sm font-medium text-[var(--wa-text)]">
+                    {availableUsers.length === 0 ? 'No saved contacts' : 'No contacts found'}
+                  </p>
+                  <p className="text-xs leading-relaxed text-[var(--wa-text-2)]">
+                    {availableUsers.length === 0
+                      ? 'Save a contact from New chat first, then add them to a group.'
+                      : 'Try a different search term.'}
+                  </p>
                 </div>
               ) : (
                 filteredUsers.map((member) => {
