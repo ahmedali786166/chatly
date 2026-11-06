@@ -39,7 +39,41 @@ const rtcConfig: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
+    // Calls between two mobile networks usually need a relay; without TURN the
+    // signaling completes but no audio ever flows (symmetric NAT).
+    {
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
   ],
+  iceCandidatePoolSize: 4,
+};
+
+const wirePeerConnection = (pc: RTCPeerConnection, remote: MediaStream) => {
+  pc.ontrack = (event) => {
+    const incoming = event.streams[0]?.getTracks() ?? [event.track];
+    incoming.forEach((track) => {
+      if (!remote.getTracks().some((existing) => existing.id === track.id)) {
+        remote.addTrack(track);
+      }
+    });
+  };
+  pc.onconnectionstatechange = () => {
+    if (pc.connectionState === 'failed') {
+      console.warn('Call media connection failed (ICE).');
+    }
+  };
 };
 
 export function CallProvider({ children }: { children: React.ReactNode }) {
@@ -214,11 +248,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       // Handle remote tracks
       const remote = new MediaStream();
       setRemoteStream(remote);
-      pc.ontrack = (event) => {
-        event.streams[0].getTracks().forEach((track) => {
-          remote.addTrack(track);
-        });
-      };
+      wirePeerConnection(pc, remote);
 
       // Create Call document in Firestore
       const callDocRef = doc(collection(db, 'calls'));
@@ -339,11 +369,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
       const remote = new MediaStream();
       setRemoteStream(remote);
-      pc.ontrack = (event) => {
-        event.streams[0].getTracks().forEach((track) => {
-          remote.addTrack(track);
-        });
-      };
+      wirePeerConnection(pc, remote);
 
       const callDocRef = doc(db, 'calls', callData.id);
       const receiverCandidatesCol = collection(callDocRef, 'receiverCandidates');

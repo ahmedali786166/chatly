@@ -137,6 +137,12 @@ img.rounded-full {
   max-width: min(75%, 560px);
 }
 
+/* Horizontal swipes on a bubble are ours (reply), vertical stays scroll. */
+.wa-swipe-col {
+  touch-action: pan-y;
+  -webkit-touch-callout: none;
+}
+
 /* Chat bubbles with WhatsApp tails. */
 .wa-bubble {
   position: relative;

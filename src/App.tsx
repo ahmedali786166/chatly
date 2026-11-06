@@ -114,6 +114,65 @@ function NavRail({
   );
 }
 
+function BottomNav({
+  active,
+  unread,
+  onChats,
+  onCalls,
+  onUpdates,
+  onTools,
+}: {
+  active: string;
+  unread: number;
+  onChats: () => void;
+  onCalls: () => void;
+  onUpdates: () => void;
+  onTools: () => void;
+}) {
+  const items = [
+    { key: 'chats', label: 'Chats', icon: MessageCircle, onClick: onChats },
+    { key: 'calls', label: 'Calls', icon: Phone, onClick: onCalls },
+    { key: 'updates', label: 'Updates', icon: CircleDashed, onClick: onUpdates },
+    { key: 'tools', label: 'Tools', icon: Settings, onClick: onTools },
+  ];
+
+  return (
+    <nav className="fixed bottom-0 left-0 right-0 z-40 flex items-stretch justify-around border-t border-[var(--wa-border)] bg-[var(--wa-header)] pb-[env(safe-area-inset-bottom)] md:hidden">
+      {items.map((item) => (
+        <button
+          key={item.key}
+          onClick={item.onClick}
+          className="flex flex-1 flex-col items-center justify-center gap-0.5 py-1.5"
+        >
+          <span
+            className={`relative flex h-8 w-12 items-center justify-center rounded-full transition ${
+              active === item.key
+                ? 'bg-[#d9fdd3] text-[#008069] dark:bg-[#103529] dark:text-[#06cf9c]'
+                : 'text-[var(--wa-text-2)]'
+            }`}
+          >
+            <item.icon className="h-5 w-5" />
+            {item.key === 'chats' && unread > 0 && (
+              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#25d366] px-1 text-[10px] font-semibold leading-none text-white">
+                {unread > 99 ? '99+' : unread}
+              </span>
+            )}
+          </span>
+          <span
+            className={`text-[11px] leading-none ${
+              active === item.key
+                ? 'font-semibold text-[var(--wa-text)]'
+                : 'text-[var(--wa-text-2)]'
+            }`}
+          >
+            {item.label}
+          </span>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
 // Keeps the app exactly as tall as the visible viewport, so the mobile
 // keyboard shrinks the chat area instead of pushing the header off-screen.
 function useAppViewportHeight() {
@@ -159,6 +218,7 @@ function MainApp() {
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showCallsModal, setShowCallsModal] = useState(false);
   const [newChatSearch, setNewChatSearch] = useState('');
+  const [unreadTotal, setUnreadTotal] = useState(0);
 
   // Notification taps land on /?chat=<id>, invite links on /?invite=<username>.
   useEffect(() => {
@@ -350,6 +410,7 @@ function MainApp() {
           onOpenStatus={() => setShowStatusModal(true)}
           onOpenChannels={() => setShowChannelsModal(true)}
           onOpenSettings={() => setShowSettingsModal(true)}
+          onUnreadChange={setUnreadTotal}
         />
       </div>
 
@@ -483,6 +544,36 @@ function MainApp() {
             setDark(isDark);
             document.documentElement.classList.toggle('dark', isDark);
             if (profile) updateProfileData({ theme }).catch(() => {});
+          }}
+        />
+      )}
+
+      {!activeConversationId && (
+        <BottomNav
+          active={
+            showCallsModal
+              ? 'calls'
+              : showStatusModal
+              ? 'updates'
+              : showSettingsModal
+              ? 'tools'
+              : 'chats'
+          }
+          unread={unreadTotal}
+          onChats={() => {
+            setShowCallsModal(false);
+            setShowStatusModal(false);
+            setShowChannelsModal(false);
+            setShowSettingsModal(false);
+          }}
+          onCalls={() => setShowCallsModal(true)}
+          onUpdates={() => {
+            setShowCallsModal(false);
+            setShowStatusModal(true);
+          }}
+          onTools={() => {
+            setShowCallsModal(false);
+            setShowSettingsModal(true);
           }}
         />
       )}

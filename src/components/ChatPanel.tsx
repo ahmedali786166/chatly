@@ -45,6 +45,8 @@ import {
   Lock,
   Trash2,
   UserPlus,
+  Loader2,
+  Clock,
 } from 'lucide-react';
 
 interface ChatPanelProps {
@@ -52,6 +54,121 @@ interface ChatPanelProps {
   onToggleRightSidebar: () => void;
   isRightSidebarOpen: boolean;
   onBackMobile?: () => void;
+}
+
+interface PendingUpload {
+  id: string;
+  docId?: string;
+  mediaType: MediaType;
+  fileName: string;
+  fileSize: number;
+  previewUrl?: string;
+  progress: number;
+}
+
+const pendingText = (mediaType: MediaType) => {
+  if (mediaType === 'image') return 'Sending photo…';
+  if (mediaType === 'video') return 'Sending video…';
+  if (mediaType === 'voice' || mediaType === 'audio') return 'Sending voice message…';
+  return 'Sending document…';
+};
+
+const PENDING_WAVE = Array.from({ length: 30 }, (_, i) => 6 + ((i * 7) % 14));
+
+function PendingMessage({ item }: { item: PendingUpload }) {
+  return (
+    <div className="mb-1 flex flex-col items-end">
+      <div className="flex w-full max-w-full items-end justify-end">
+        <div className="wa-message-col flex flex-col items-end">
+          <div className="wa-bubble wa-bubble-out p-1.5">
+            {item.mediaType === 'image' && item.previewUrl && (
+              <div className="relative mb-1 overflow-hidden rounded-md">
+                <img
+                  src={item.previewUrl}
+                  alt="Sending"
+                  className="h-auto max-h-72 w-auto max-w-[300px] object-contain opacity-80"
+                />
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/40 px-3 text-center text-white">
+                  <Loader2 className="h-6 w-6 animate-spin" />
+                  <span className="text-[12px] font-medium">
+                    {pendingText(item.mediaType)} {item.progress}%
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {item.mediaType === 'video' && item.previewUrl && (
+              <div className="relative mb-1 overflow-hidden rounded-md bg-black">
+                <video
+                  src={item.previewUrl}
+                  muted
+                  playsInline
+                  className="max-h-80 w-full max-w-sm object-contain opacity-80"
+                />
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/40 px-3 text-center text-white">
+                  <Loader2 className="h-6 w-6 animate-spin" />
+                  <span className="text-[12px] font-medium">
+                    {pendingText(item.mediaType)} {item.progress}%
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {(item.mediaType === 'voice' || item.mediaType === 'audio') && (
+              <div className="flex min-w-[236px] items-center gap-2.5 px-1 py-1">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#00a884]/70 text-white">
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex h-6 items-center gap-[2px]">
+                    {PENDING_WAVE.map((height, index) => (
+                      <span
+                        key={index}
+                        className="w-[2px] shrink-0 rounded-full bg-black/20 dark:bg-white/25"
+                        style={{ height: `${height}px` }}
+                      />
+                    ))}
+                  </div>
+                  <div className="mt-0.5 flex items-center justify-between text-[10.5px] leading-none text-[var(--wa-text-2)]">
+                    <span className="truncate">
+                      {pendingText(item.mediaType)} {item.progress}%
+                    </span>
+                    <span>{Math.round(item.fileSize / 1024)} KB</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {item.mediaType === 'document' && (
+              <div className="mb-1 flex min-w-[230px] items-center gap-2.5 rounded-md bg-black/[0.06] px-2.5 py-2 dark:bg-black/20">
+                <FileText className="h-6 w-6 shrink-0 text-[#7f66ff]" />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[12.5px] font-medium text-[var(--wa-text)]">
+                    {item.fileName}
+                  </div>
+                  <div className="text-[10.5px] text-[var(--wa-text-2)]">
+                    {pendingText(item.mediaType)} {item.progress}%
+                  </div>
+                  <div className="mt-1 h-1 overflow-hidden rounded-full bg-black/10 dark:bg-white/15">
+                    <div
+                      className="h-full rounded-full bg-[#00a884] transition-all duration-200"
+                      style={{ width: `${item.progress}%` }}
+                    />
+                  </div>
+                </div>
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[var(--wa-text-2)]" />
+              </div>
+            )}
+
+            <div className="mt-0.5 flex items-center justify-end gap-1 px-1 text-[10.5px] leading-none text-[var(--wa-text-2)]">
+              <Clock className="h-3 w-3" />
+              <span className="tabular-nums">{formatTime12(new Date())}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 const EMOJI_LIST = [
@@ -111,8 +228,7 @@ export function ChatPanel({
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearchBar, setShowSearchBar] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
+  const [pending, setPending] = useState<PendingUpload[]>([]);
   const [showPhoto, setShowPhoto] = useState(false);
   const [showContactDialog, setShowContactDialog] = useState(false);
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
@@ -265,7 +381,19 @@ export function ChatPanel({
   useEffect(() => {
     const container = scrollContainerRef.current;
     container?.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
-  }, [messages.length]);
+  }, [messages.length, pending.length]);
+
+  // Drop the optimistic bubble once Firestore delivers the real message.
+  useEffect(() => {
+    if (pending.length === 0 || messages.length === 0) return;
+    const arrivedIds = new Set(messages.map((m) => m.id));
+    const arrived = pending.filter((item) => item.docId && arrivedIds.has(item.docId));
+    if (arrived.length === 0) return;
+    arrived.forEach((item) => {
+      if (item.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(item.previewUrl);
+    });
+    setPending((prev) => prev.filter((item) => !arrived.some((a) => a.id === item.id)));
+  }, [messages, pending]);
 
   // Reset draft / reply state when switching chats
   useEffect(() => {
@@ -276,6 +404,12 @@ export function ChatPanel({
     setShowAttachMenu(false);
     setSearchQuery('');
     setShowSearchBar(false);
+    setPending((prev) => {
+      prev.forEach((item) => {
+        if (item.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(item.previewUrl);
+      });
+      return [];
+    });
     if (typingActiveRef.current && user) {
       updateDoc(doc(db, 'conversations', conversation.id), {
         [`typingUsers.${user.uid}`]: false,
@@ -439,18 +573,37 @@ export function ChatPanel({
         ? 'image'
         : 'document';
 
-    setUploading(true);
-    setUploadProgress(0);
+    // Show the attachment in the chat right away, WhatsApp-style, then swap it
+    // for the Firestore message once the upload finishes.
+    const localId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const previewUrl = mediaType === 'document' ? undefined : URL.createObjectURL(file);
+    setPending((prev) => [
+      ...prev,
+      {
+        id: localId,
+        mediaType,
+        fileName: file.name,
+        fileSize: file.size,
+        previewUrl,
+        progress: 0,
+      },
+    ]);
+
+    const patchPending = (patch: Partial<PendingUpload>) => {
+      setPending((prev) =>
+        prev.map((item) => (item.id === localId ? { ...item, ...patch } : item))
+      );
+    };
 
     try {
       const url = await uploadFile(
         file,
         `chat_media/${conversation.id}/${Date.now()}_${file.name.replace(/[^\w.\-]+/g, '_')}`,
-        setUploadProgress
+        (progress) => patchPending({ progress })
       );
 
       const now = new Date().toISOString();
-      await addDoc(collection(db, 'conversations', conversation.id, 'messages'), {
+      const docRef = await addDoc(collection(db, 'conversations', conversation.id, 'messages'), {
         conversationId: conversation.id,
         senderId: user.uid,
         senderName: profile.displayName,
@@ -464,6 +617,7 @@ export function ChatPanel({
         deliveredTo: [user.uid],
         createdAt: now,
       });
+      patchPending({ docId: docRef.id, progress: 100 });
 
       const preview =
         mediaType === 'image'
@@ -487,14 +641,13 @@ export function ChatPanel({
       if (profile.soundEnabled !== false) sounds.playSent();
       void sendPushPing();
     } catch (err) {
+      if (previewUrl?.startsWith('blob:')) URL.revokeObjectURL(previewUrl);
+      setPending((prev) => prev.filter((item) => item.id !== localId));
       addToast({
         title: 'Upload failed',
         message: err instanceof Error ? err.message : 'Could not send this file.',
         type: 'error',
       });
-    } finally {
-      setUploading(false);
-      setUploadProgress(0);
     }
   };
 
@@ -519,18 +672,35 @@ export function ChatPanel({
         if (seconds < 1 || !user || !profile) return;
 
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        setUploading(true);
-        setUploadProgress(0);
+        const localId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        const previewUrl = URL.createObjectURL(audioBlob);
+        setPending((prev) => [
+          ...prev,
+          {
+            id: localId,
+            mediaType: 'voice',
+            fileName: `voice-note-${seconds}s.webm`,
+            fileSize: audioBlob.size,
+            previewUrl,
+            progress: 0,
+          },
+        ]);
+
+        const patchPending = (patch: Partial<PendingUpload>) => {
+          setPending((prev) =>
+            prev.map((item) => (item.id === localId ? { ...item, ...patch } : item))
+          );
+        };
 
         try {
           const audioUrl = await uploadFile(
             audioBlob,
             `voice_notes/${conversation.id}/${Date.now()}.webm`,
-            setUploadProgress
+            (progress) => patchPending({ progress })
           );
           const now = new Date().toISOString();
 
-          await addDoc(collection(db, 'conversations', conversation.id, 'messages'), {
+          const docRef = await addDoc(collection(db, 'conversations', conversation.id, 'messages'), {
             conversationId: conversation.id,
             senderId: user.uid,
             senderName: profile.displayName,
@@ -544,6 +714,7 @@ export function ChatPanel({
             deliveredTo: [user.uid],
             createdAt: now,
           });
+          patchPending({ docId: docRef.id, progress: 100 });
 
           await updateDoc(doc(db, 'conversations', conversation.id), {
             lastMessage: {
@@ -560,14 +731,13 @@ export function ChatPanel({
           if (profile.soundEnabled !== false) sounds.playSent();
           void sendPushPing();
         } catch (err) {
+          URL.revokeObjectURL(previewUrl);
+          setPending((prev) => prev.filter((item) => item.id !== localId));
           addToast({
             title: 'Voice note failed',
             message: err instanceof Error ? err.message : 'Could not send the recording.',
             type: 'error',
           });
-        } finally {
-          setUploading(false);
-          setUploadProgress(0);
         }
       };
 
@@ -844,7 +1014,7 @@ export function ChatPanel({
         onScroll={handleScroll}
         className={`${wallpaperClass} min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2.5 py-4 sm:px-4 md:px-8 lg:px-14`}
       >
-        {filteredMessages.length === 0 ? (
+        {filteredMessages.length === 0 && pending.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center text-center">
             <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-[var(--wa-panel)] text-[#00a884] shadow-sm">
               <Smile className="h-8 w-8" />
@@ -882,7 +1052,11 @@ export function ChatPanel({
                     message={msg}
                     isMe={msg.senderId === user?.uid}
                     isGroup={isGroup}
-                    onReply={setReplyingTo}
+                    onReply={(message) => {
+                      setEditingMessage(null);
+                      setReplyingTo(message);
+                      textareaRef.current?.focus();
+                    }}
                     onReaction={handleReaction}
                     onDeleteForEveryone={handleDeleteForEveryone}
                     onDeleteForMe={handleDeleteForMe}
@@ -897,6 +1071,10 @@ export function ChatPanel({
                 </React.Fragment>
               );
             })}
+
+            {!searchQuery &&
+              pending.map((item) => <PendingMessage key={item.id} item={item} />)}
+
             <div ref={messagesEndRef} />
           </>
         )}
@@ -952,19 +1130,6 @@ export function ChatPanel({
           >
             Unblock
           </button>
-        </div>
-      )}
-
-      {/* Upload progress */}
-      {uploading && (
-        <div className="z-20 flex items-center justify-between gap-3 border-t border-[var(--wa-border)] bg-[var(--wa-panel)] px-4 py-2 text-[12px] text-[var(--wa-text-2)]">
-          <span>Sending attachment ({uploadProgress}%)</span>
-          <div className="h-1.5 w-28 overflow-hidden rounded-full bg-[var(--wa-hover)]">
-            <div
-              className="h-full rounded-full bg-[#00a884] transition-all duration-200"
-              style={{ width: `${uploadProgress}%` }}
-            />
-          </div>
         </div>
       )}
 

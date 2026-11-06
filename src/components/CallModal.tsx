@@ -1,8 +1,10 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useCall } from '../context/CallContext';
+import { useAuth } from '../context/AuthContext';
 import { Phone, PhoneOff, Mic, MicOff, Video, VideoOff, Volume2, VolumeX } from 'lucide-react';
 
 export function CallModal() {
+  const { user } = useAuth();
   const {
     activeCall,
     incomingCall,
@@ -20,6 +22,8 @@ export function CallModal() {
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement>(null);
+  const [audioBlocked, setAudioBlocked] = useState(false);
 
   useEffect(() => {
     if (localVideoRef.current) localVideoRef.current.srcObject = localStream;
@@ -28,6 +32,30 @@ export function CallModal() {
   useEffect(() => {
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remoteStream;
   }, [remoteStream, activeCall]);
+
+  // Remote audio must live on its own <audio> element: mobile browsers block
+  // autoplay that starts after the tap gesture, so we retry and offer a manual
+  // "tap to enable sound" fallback instead of silently staying muted.
+  useEffect(() => {
+    const audio = remoteAudioRef.current;
+    if (!audio) return;
+    audio.srcObject = remoteStream;
+    if (!remoteStream) {
+      setAudioBlocked(false);
+      return;
+    }
+    audio
+      .play()
+      .then(() => setAudioBlocked(false))
+      .catch(() => setAudioBlocked(true));
+  }, [remoteStream]);
+
+  const unlockAudio = () => {
+    remoteAudioRef.current
+      ?.play()
+      .then(() => setAudioBlocked(false))
+      .catch(() => setAudioBlocked(true));
+  };
 
   const formatTime = (secs: number) => {
     const h = Math.floor(secs / 3600);
@@ -95,22 +123,32 @@ export function CallModal() {
   if (activeCall) {
     const isVideo = activeCall.callType === 'video';
     const isOngoing = activeCall.status === 'ongoing';
+    // The receiver's copy of the call doc has their own name in receiverName,
+    // so show the other person on both sides.
+    const iAmReceiver = activeCall.receiverId === user?.uid;
+    const peerName = iAmReceiver ? activeCall.callerName : activeCall.receiverName;
+    const peerPhoto = iAmReceiver ? activeCall.callerPhoto : activeCall.receiverPhoto;
+    const peerId = iAmReceiver ? activeCall.callerId : activeCall.receiverId;
 
     return (
-      <div className="fixed inset-0 z-[60] flex flex-col bg-[#0b141a] text-white animate-fade-in">
+      <div
+        className="fixed inset-0 z-[60] flex flex-col bg-[#0b141a] text-white animate-fade-in"
+        onClick={() => {
+          if (audioBlocked) unlockAudio();
+        }}
+      >
+        <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
+
         {/* Header */}
         <div className="relative z-20 flex items-center gap-3 px-4 py-4 sm:px-6">
           <img
-            src={
-              activeCall.receiverPhoto ||
-              `https://api.dicebear.com/7.x/bottts/svg?seed=${activeCall.receiverId}`
-            }
+            src={peerPhoto || `https://api.dicebear.com/7.x/bottts/svg?seed=${peerId}`}
             alt=""
             className="h-10 w-10 rounded-full object-cover"
           />
           <div className="min-w-0">
             <h3 className="truncate text-[16px] font-medium text-white">
-              {activeCall.receiverName}
+              {peerName}
             </h3>
             <p className="flex items-center gap-1.5 text-[12.5px] text-[#8696a0]">
               {isOngoing ? (
@@ -159,19 +197,25 @@ export function CallModal() {
               <div className="relative mb-6">
                 <div className="absolute inset-0 animate-ping rounded-full bg-[#00a884]/15" />
                 <img
-                  src={
-                    activeCall.receiverPhoto ||
-                    `https://api.dicebear.com/7.x/bottts/svg?seed=${activeCall.receiverId}`
-                  }
+                  src={peerPhoto || `https://api.dicebear.com/7.x/bottts/svg?seed=${peerId}`}
                   alt=""
                   className="relative h-[136px] w-[136px] rounded-full object-cover ring-2 ring-white/10"
                 />
               </div>
-              <h2 className="text-[24px] font-normal text-white">{activeCall.receiverName}</h2>
+              <h2 className="text-[24px] font-normal text-white">{peerName}</h2>
               <p className="mt-1 text-[14px] text-[#8696a0]">
                 {isOngoing ? formatTime(callDuration) : 'Ringing…'}
               </p>
-              <audio ref={remoteVideoRef} autoPlay />
+
+              {audioBlocked && (
+                <button
+                  onClick={unlockAudio}
+                  className="mt-5 flex items-center gap-2 rounded-full bg-white px-4 py-2 text-[13px] font-semibold text-[#0b141a] shadow-lg"
+                >
+                  <Volume2 className="h-4 w-4" />
+                  Tap to enable sound
+                </button>
+              )}
             </div>
           )}
         </div>

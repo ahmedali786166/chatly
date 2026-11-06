@@ -37,6 +37,7 @@ import {
   Pin,
   ArchiveRestore,
   Check,
+  Camera,
 } from 'lucide-react';
 
 interface LeftSidebarProps {
@@ -48,9 +49,10 @@ interface LeftSidebarProps {
   onOpenStatus: () => void;
   onOpenChannels: () => void;
   onOpenSettings: () => void;
+  onUnreadChange?: (count: number) => void;
 }
 
-type FilterTab = 'all' | 'unread' | 'groups' | 'archived';
+type FilterTab = 'all' | 'unread' | 'favorites' | 'groups' | 'archived';
 
 export function LeftSidebar({
   activeConversationId,
@@ -61,11 +63,12 @@ export function LeftSidebar({
   onOpenStatus,
   onOpenChannels,
   onOpenSettings,
+  onUnreadChange,
 }: LeftSidebarProps) {
   const { user, profile } = useAuth();
   const { addToast, sendPushNotification } = useNotification();
   const { isInstalled, promptInstall } = usePwaInstall();
-  const { displayNameFor, photoFor, nicknameFor, directory } = useDirectory();
+  const { displayNameFor, photoFor, nicknameFor, directory, isSavedContact } = useDirectory();
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [filterTab, setFilterTab] = useState<FilterTab>('all');
@@ -77,6 +80,8 @@ export function LeftSidebar({
   const initialized = useRef(false);
   const activeIdRef = useRef(activeConversationId);
   activeIdRef.current = activeConversationId;
+  const unreadCallbackRef = useRef(onUnreadChange);
+  unreadCallbackRef.current = onUnreadChange;
 
   // Real-time conversations (sorted client-side to avoid composite indexes)
   useEffect(() => {
@@ -146,6 +151,19 @@ export function LeftSidebar({
 
         initialized.current = true;
         setConversations(list);
+
+        const unreadTotal = list.reduce((sum, conv) => {
+          if (conv.archivedBy?.includes(user.uid)) return sum;
+          const own = conv.unreadCounts?.[user.uid] || 0;
+          const fallback =
+            conv.lastMessage &&
+            conv.lastMessage.senderId !== user.uid &&
+            !conv.lastMessage.readBy?.includes(user.uid)
+              ? 1
+              : 0;
+          return sum + Math.max(own, fallback);
+        }, 0);
+        unreadCallbackRef.current?.(unreadTotal);
       },
       (err) => {
         handleFirestoreError(err, OperationType.LIST, 'conversations');
@@ -173,6 +191,12 @@ export function LeftSidebar({
       if (filterTab === 'archived' && !isArchived) return false;
       if (filterTab !== 'archived' && isArchived) return false;
       if (filterTab === 'groups' && c.type !== 'group') return false;
+
+      if (filterTab === 'favorites') {
+        if (c.type === 'group') return false;
+        const otherId = c.participantIds.find((id) => id !== user?.uid);
+        if (!isSavedContact(otherId)) return false;
+      }
 
       const unread = c.unreadCounts?.[user?.uid || ''] || 0;
       if (filterTab === 'unread' && unread === 0) return false;
@@ -207,7 +231,7 @@ export function LeftSidebar({
           new Date(a.updatedAt || a.createdAt).getTime()
         );
       });
-  }, [conversations, filterTab, searchQuery, user?.uid, displayNameFor, nicknameFor, directory]);
+  }, [conversations, filterTab, searchQuery, user?.uid, displayNameFor, nicknameFor, directory, isSavedContact]);
 
   const formatTime = (isoString?: string) => {
     if (!isoString) return '';
@@ -244,6 +268,17 @@ export function LeftSidebar({
   };
 
   const archivedCount = conversations.filter((c) => c.archivedBy?.includes(user?.uid || '')).length;
+  const unreadChatCount = conversations.filter((c) => {
+    if (c.archivedBy?.includes(user?.uid || '')) return false;
+    const own = c.unreadCounts?.[user?.uid || ''] || 0;
+    const fallback =
+      c.lastMessage &&
+      c.lastMessage.senderId !== user?.uid &&
+      !c.lastMessage.readBy?.includes(user?.uid || '')
+        ? 1
+        : 0;
+    return own > 0 || fallback > 0;
+  }).length;
 
   const menuItems: {
     label: string;
@@ -293,7 +328,11 @@ export function LeftSidebar({
     <div className="flex h-full w-full flex-col bg-[var(--wa-panel)]">
       {/* Header */}
       <header className="flex h-[60px] shrink-0 items-center justify-between bg-[var(--wa-header)] px-4">
-        <div className="flex items-center gap-3">
+        <h1 className="text-[22px] font-bold tracking-tight text-[var(--wa-text)] md:hidden">
+          Chatly
+        </h1>
+
+        <div className="hidden items-center gap-3 md:flex">
           <button
             onClick={onOpenSettings}
             className="relative shrink-0 rounded-full transition hover:opacity-90"
@@ -319,25 +358,18 @@ export function LeftSidebar({
 
         <div className="flex items-center gap-1">
           <button
+            onClick={onOpenStatus}
+            className="flex h-10 w-10 items-center justify-center rounded-full text-[#54656f] transition hover:bg-black/5 md:hidden dark:text-[#aebac1] dark:hover:bg-white/5"
+            title="Camera"
+          >
+            <Camera className="h-6 w-6" />
+          </button>
+          <button
             onClick={onOpenNewChat}
-            className="flex h-10 w-10 items-center justify-center rounded-full text-[#54656f] transition hover:bg-black/5 dark:text-[#aebac1] dark:hover:bg-white/5"
+            className="hidden h-10 w-10 items-center justify-center rounded-full text-[#54656f] transition hover:bg-black/5 md:flex dark:text-[#aebac1] dark:hover:bg-white/5"
             title="New chat"
           >
             <Plus className="h-6 w-6" />
-          </button>
-          <button
-            onClick={onOpenCalls}
-            className="flex h-10 w-10 items-center justify-center rounded-full text-[#54656f] transition hover:bg-black/5 dark:text-[#aebac1] dark:hover:bg-white/5 md:hidden"
-            title="Calls"
-          >
-            <Phone className="h-6 w-6" />
-          </button>
-          <button
-            onClick={onOpenStatus}
-            className="flex h-10 w-10 items-center justify-center rounded-full text-[#54656f] transition hover:bg-black/5 dark:text-[#aebac1] dark:hover:bg-white/5 md:hidden"
-            title="Status"
-          >
-            <CircleDashed className="h-6 w-6" />
           </button>
           <div className="relative">
             <button
@@ -395,18 +427,30 @@ export function LeftSidebar({
           All
         </button>
         <button className={chipClass('unread')} onClick={() => setFilterTab('unread')}>
-          Unread
+          Unread {unreadChatCount > 0 ? unreadChatCount : ''}
+        </button>
+        <button className={chipClass('favorites')} onClick={() => setFilterTab('favorites')}>
+          Favorites
         </button>
         <button className={chipClass('groups')} onClick={() => setFilterTab('groups')}>
           Groups
         </button>
-        <button className={chipClass('archived')} onClick={() => setFilterTab('archived')}>
-          Archived {archivedCount > 0 ? `(${archivedCount})` : ''}
+        <button
+          onClick={onOpenNewChat}
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[var(--wa-border)] text-[var(--wa-text-2)] transition hover:bg-[var(--wa-hover)]"
+          title="New chat"
+        >
+          <Plus className="h-4 w-4" />
         </button>
+        {filterTab === 'archived' && (
+          <button className={chipClass('archived')} onClick={() => setFilterTab('all')}>
+            Archived {archivedCount > 0 ? `(${archivedCount})` : ''}
+          </button>
+        )}
       </div>
 
       {/* Chat list */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto pb-24 md:pb-0">
         {filteredConversations.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center px-8 text-center">
             <MessageCircle className="mb-3 h-10 w-10 text-[var(--wa-text-3)]" />
@@ -592,8 +636,17 @@ export function LeftSidebar({
         )}
       </div>
 
+      {/* Compose FAB (mobile) */}
+      <button
+        onClick={onOpenNewChat}
+        className="fixed bottom-[84px] right-4 z-30 flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--wa-panel)] text-[var(--wa-text)] shadow-xl ring-1 ring-[var(--wa-border)] transition active:scale-95 md:hidden"
+        title="New chat"
+      >
+        <Plus className="h-6 w-6" />
+      </button>
+
       {/* Footer hint */}
-      <div className="flex shrink-0 items-center justify-between border-t border-[var(--wa-border)] px-4 py-2.5 text-[11px] text-[var(--wa-text-2)]">
+      <div className="hidden shrink-0 items-center justify-between border-t border-[var(--wa-border)] px-4 py-2.5 text-[11px] text-[var(--wa-text-2)] md:flex">
         <span className="flex items-center gap-1.5">
           <span className="h-1.5 w-1.5 rounded-full bg-[#25d366]" />
           Real-time synced
